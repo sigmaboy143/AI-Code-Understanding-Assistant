@@ -1,0 +1,28 @@
+// Re-export all shared types from the extension host types module.
+// Vite resolves @shared/* → ../src/types/index.ts via the alias in vite.config.ts
+export type {
+  ExplanationMode,
+  ConfidenceLevel,
+  PanelTab,
+  CodeContext,
+  Evidence,
+  ExplanationResponse,
+  WhyResponse,
+  CommitInfo,
+  PrInfo,
+  RelationNode,
+  RelationEdge,
+  RelationsResponse,
+  DataFlowStep,
+  DataFlowResponse,
+  HistoryResponse,
+  ImpactNode,
+  ImpactResponse,
+  TestInfo,
+  TestsResponse,
+  DebugResponse,
+  ArchitectureLayer,
+  ArchitectureResponse,
+  ExtensionToWebviewMessage,
+  WebviewToExtensionMessage,
+} from "@shared/index";

@@ -1,0 +1,64 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Global styles — uses VS Code CSS variables for full theme compatibility
+   ───────────────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Map VS Code theme variables with fallbacks for browser dev mode */
+  --bg: var(--vscode-editor-background, #1e1e1e);
+  --surface: var(--vscode-sideBar-background, #252526);
+  --surface2: var(--vscode-input-background, #3c3c3c);
+  --border: var(--vscode-panel-border, #454545);
+  --text: var(--vscode-editor-foreground, #d4d4d4);
+  --text-muted: var(--vscode-descriptionForeground, #8b8b8b);
+  --accent: var(--vscode-button-background, #0e70c0);
+  --accent-fg: var(--vscode-button-foreground, #ffffff);
+  --error: var(--vscode-errorForeground, #f48771);
+  --warning: var(--vscode-editorWarning-foreground, #cca700);
+  --success: var(--vscode-terminal-ansiGreen, #4ec9b0);
+  --font: var(--vscode-font-family, -apple-system, "Segoe UI", system-ui, sans-serif);
+  --font-mono: var(--vscode-editor-font-family, "Cascadia Code", "Fira Code", monospace);
+  --radius: 4px;
+  --radius-lg: 8px;
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+button {
+  font-family: var(--font);
+  font-size: 12px;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  border-radius: var(--radius);
+  transition: opacity 0.15s;
+}
+
+button:active { opacity: 0.8; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code, pre {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }

@@ -1,0 +1,181 @@
+{
+  "name": "aicode-understanding-assistant",
+  "displayName": "AI Code Understanding Assistant",
+  "description": "AI-powered code understanding assistant for Visual Studio Code that explains code, detects issues, and helps developers understand complex programs.",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aicode.explainSelection",
+        "title": "Explain Selected Code",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.explainFile",
+        "title": "Explain File",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.whyExists",
+        "title": "Why Does This Exist?",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.showRelationships",
+        "title": "Show Relationships",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.traceDataFlow",
+        "title": "Trace Data Flow",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.showHistory",
+        "title": "Show History",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.showImpact",
+        "title": "Show Impact",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.findRelatedTests",
+        "title": "Find Related Tests",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.explainError",
+        "title": "Explain Error / Debug",
+        "category": "AI Code"
+      },
+      {
+        "command": "aicode.openAssistant",
+        "title": "Open AI Assistant Panel",
+        "category": "AI Code"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "aicode.explainSelection",
+          "when": "editorHasSelection",
+          "group": "aicode@1"
+        },
+        {
+          "command": "aicode.whyExists",
+          "when": "editorHasSelection",
+          "group": "aicode@2"
+        },
+        {
+          "command": "aicode.showRelationships",
+          "when": "editorHasSelection",
+          "group": "aicode@3"
+        },
+        {
+          "command": "aicode.traceDataFlow",
+          "when": "editorHasSelection",
+          "group": "aicode@4"
+        },
+        {
+          "command": "aicode.showHistory",
+          "when": "editorHasSelection",
+          "group": "aicode@5"
+        },
+        {
+          "command": "aicode.showImpact",
+          "when": "editorHasSelection",
+          "group": "aicode@6"
+        },
+        {
+          "command": "aicode.findRelatedTests",
+          "when": "editorHasSelection",
+          "group": "aicode@7"
+        },
+        {
+          "command": "aicode.openAssistant",
+          "group": "aicode@8"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aicode-sidebar",
+          "title": "AI Code Assistant",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "aicode-sidebar": [
+        {
+          "type": "webview",
+          "id": "aicode.sidePanel",
+          "name": "AI Code Understanding"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AI Code Understanding Assistant",
+      "properties": {
+        "aicode.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "Backend API base URL"
+        },
+        "aicode.useMockData": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use mock data instead of real backend (for development)"
+        },
+        "aicode.explanationMode": {
+          "type": "string",
+          "enum": [
+            "beginner",
+            "intermediate",
+            "advanced"
+          ],
+          "default": "intermediate",
+          "description": "Default explanation depth"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile && npm run build-webview",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build-webview": "cd webview-ui && npm run build",
+    "watch-webview": "cd webview-ui && npm run dev",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "@types/vscode": "^1.138.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "axios": "^1.20.0",
+    "eslint": "^10.5.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  }
+}
