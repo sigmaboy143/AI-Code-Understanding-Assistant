@@ -63,12 +63,13 @@ export interface AppState {
   clearConversation: () => void;
 }
 
-function tabLoading(tab: PanelTab, state: AppState): Partial<AppState> {
-  return { [tab]: { status: "loading" } } as Partial<AppState>;
-}
-
-function tabError(tab: PanelTab, message: string): Partial<AppState> {
-  return { [tab]: { status: "error", error: message } } as Partial<AppState>;
+/**
+ * Maps a PanelTab value (used in messages) to the corresponding store state key.
+ * "explain" → "explanation" because the store uses "explanation" as the key
+ * to match the full type name (ExplanationResponse), while the tab ID is "explain".
+ */
+function tabKey(tab: PanelTab): string {
+  return tab === "explain" ? "explanation" : tab;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -94,9 +95,9 @@ export const useAppStore = create<AppState>((set) => ({
   setExplanationMode: (mode) => set({ explanationMode: mode }),
   setUseMock: (v) => set({ useMock: v }),
 
-  setLoading: (tab) => set((s) => ({ ...s, [tab]: { status: "loading" } })),
+  setLoading: (tab) => set((s) => ({ ...s, [tabKey(tab)]: { status: "loading" } })),
   setError: (tab, message) =>
-    set((s) => ({ ...s, [tab]: { status: "error", error: message } })),
+    set((s) => ({ ...s, [tabKey(tab)]: { status: "error", error: message } })),
 
   setExplanation: (data) =>
     set({ explanation: { status: "success", data } }),

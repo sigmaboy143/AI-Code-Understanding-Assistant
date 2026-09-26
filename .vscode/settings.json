@@ -7,5 +7,24 @@
 		"out": true // set this to false to include "out" folder in search results
 	},
 	// Turn off tsc task auto detection since we have the necessary tasks as npm scripts
-	"js/ts.tsc.autoDetect": "off"
+	"js/ts.tsc.autoDetect": "off",
+
+	// ── Code Runner configuration ─────────────────────────────────────────
+	// IMPORTANT: Extension host .ts files (src/**) CANNOT be run with Code Runner.
+	// They import "vscode" which only exists inside the VS Code Extension Host process.
+	// Running them with ts-node produces: "'ts-node' is not recognized..."
+	//
+	// The correct development workflow is:
+	//   1. npm run compile  (or press F5 which runs the watch task automatically)
+	//   2. Press F5 → Extension Development Host opens
+	//   3. Test the extension in that new window
+	//
+	// The settings below prevent Code Runner from accidentally running extension files.
+	"code-runner.respectShebang": false,
+	"code-runner.ignoreSelection": false,
+	// Disable code-runner for TypeScript files in this workspace.
+	// TypeScript files here are VS Code extension host modules, not standalone scripts.
+	"code-runner.executorMapByFileExtension": {
+		".ts": "echo \"❌ Cannot run .ts extension files directly. Use F5 to launch the Extension Development Host.\""
+	}
 }
