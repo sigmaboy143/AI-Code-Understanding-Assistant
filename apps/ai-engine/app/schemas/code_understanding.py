@@ -19,6 +19,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.evidence.models import ResponseConfidence  # noqa: E402 — no circular dep
+
 # Guard rails so a single request can never smuggle an unbounded payload.
 MAX_SOURCE_CODE_LENGTH = 100_000
 MAX_FILE_PATH_LENGTH = 1_024
@@ -237,3 +239,11 @@ class CodeUnderstandingResponse(CodeSchema):
     dependencies: DependencyAnalysis | None = None
     improvements: list[ImprovementSuggestion] = Field(default_factory=list)
     metadata: AnalysisMetadata
+    confidence: ResponseConfidence | None = Field(
+        default=None,
+        description=(
+            "Evidence-backed confidence level for the response. "
+            "CONFIRMED when evidence is available; UNKNOWN otherwise. "
+            "None when the confidence system has not been invoked."
+        ),
+    )
