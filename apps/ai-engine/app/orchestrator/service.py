@@ -3,7 +3,7 @@
 Responsibilities
 ----------------
 1. Accept a ``CodeUnderstandingRequest`` (Task-2 schema).
-2. Build an ``LLMRequest`` (system prompt + user message).
+2. Build an ``LLMRequest`` via the reasoning layer (Task-6).
 3. Delegate to the injected ``LLMProvider`` (Task-3 interface).
 4. Parse the ``LLMResponse`` into a ``CodeUnderstandingResponse``.
 5. Propagate ``ProviderError`` without wrapping it in additional layers.
@@ -11,28 +11,25 @@ Responsibilities
 Design notes
 ------------
 - The service is provider-agnostic; no concrete provider is imported here.
-- Prompt construction is isolated in ``_build_messages`` so it can be extended
-  (e.g., with RAG context, evidence, or agent instructions) without touching
-  the rest of the service.
+- Prompt construction is fully delegated to ``app.reasoning`` so reasoning
+  logic can evolve without touching the orchestration loop.
 - Response parsing is isolated in ``_parse_response`` for the same reason.
+- ``analyse`` accepts an optional ``retrieved_chunks`` argument so the
+  retrieval layer (Task 7) can inject RAG context without an API change.
 - All public methods are async so callers can use the same concurrency model
   regardless of whether the underlying provider is sync or async.
 """
 
 from __future__ import annotations
 
-from app.providers.base import LLMMessage, LLMProvider, LLMRequest, LLMResponse
+from typing import Sequence
+
+from app.providers.base import LLMProvider, LLMRequest, LLMResponse
+from app.reasoning import build_reasoning_request
 from app.schemas.code_understanding import (
     AnalysisMetadata,
     CodeUnderstandingRequest,
     CodeUnderstandingResponse,
-)
-
-_SYSTEM_PROMPT = (
-    "You are an expert software engineer. "
-    "Analyse the provided source code and answer the user's request. "
-    "Be concise, accurate, and language-agnostic. "
-    "Do not fabricate facts about the code."
 )
 
 
@@ -59,13 +56,20 @@ class OrchestratorService:
     # Public API
     # ------------------------------------------------------------------
 
-    async def analyse(self, request: CodeUnderstandingRequest) -> CodeUnderstandingResponse:
+    async def analyse(
+        self,
+        request: CodeUnderstandingRequest,
+        retrieved_chunks: Sequence | None = None,
+    ) -> CodeUnderstandingResponse:
         """Analyse *request* using the configured LLM provider.
 
         Parameters
         ----------
         request:
             A validated ``CodeUnderstandingRequest``.
+        retrieved_chunks:
+            Optional RAG context from the retrieval layer (Task 7).
+            When provided the chunks are injected into the prompt.
 
         Returns
         -------
@@ -77,58 +81,26 @@ class OrchestratorService:
         ProviderError
             Propagated directly from the provider when the LLM call fails.
         """
-        llm_request = self._build_llm_request(request)
+        llm_request = self._build_llm_request(request, retrieved_chunks)
         llm_response = await self._provider.complete(llm_request)
         return self._parse_response(llm_response, request)
 
     # ------------------------------------------------------------------
-    # Prompt construction (extensible hook for RAG / context builders)
+    # Prompt construction — delegates to the reasoning layer
     # ------------------------------------------------------------------
 
-    def _build_llm_request(self, request: CodeUnderstandingRequest) -> LLMRequest:
+    def _build_llm_request(
+        self,
+        request: CodeUnderstandingRequest,
+        retrieved_chunks: Sequence | None = None,
+    ) -> LLMRequest:
         """Convert a ``CodeUnderstandingRequest`` into an ``LLMRequest``.
 
-        Future enhancements (RAG retrieval, evidence injection, specialised
-        agent instructions) should extend this method rather than touching
-        ``analyse``.
+        Delegates to ``app.reasoning.build_reasoning_request`` so that all
+        prompt logic lives in one place and can be enriched (RAG context,
+        evidence, agent instructions) without touching ``analyse``.
         """
-        messages = self._build_messages(request)
-        return LLMRequest(messages=messages)
-
-    def _build_messages(self, request: CodeUnderstandingRequest) -> list[LLMMessage]:
-        """Construct the ordered list of prompt messages."""
-        system_msg = LLMMessage(role="system", content=_SYSTEM_PROMPT)
-        user_msg = LLMMessage(role="user", content=self._format_user_message(request))
-        return [system_msg, user_msg]
-
-    @staticmethod
-    def _format_user_message(request: CodeUnderstandingRequest) -> str:
-        """Build the user-facing portion of the prompt from request fields."""
-        parts: list[str] = []
-
-        # File path context
-        if request.file_path:
-            parts.append(f"File: {request.file_path}")
-
-        # Language
-        parts.append(f"Language: {request.language.value}")
-
-        # Requested analyses
-        analysis_labels = ", ".join(a.value for a in request.analyses)
-        parts.append(f"Requested analyses: {analysis_labels}")
-
-        # Source code
-        parts.append(f"\nSource code:\n```{request.language.value}\n{request.source_code}\n```")
-
-        # Optional question
-        if request.question:
-            parts.append(f"\nQuestion: {request.question}")
-
-        # Optional extra context (e.g., error output, related code)
-        if request.context:
-            parts.append(f"\nAdditional context:\n{request.context}")
-
-        return "\n".join(parts)
+        return build_reasoning_request(request, retrieved_chunks)
 
     # ------------------------------------------------------------------
     # Response parsing (extensible hook for evidence extraction, scoring)
