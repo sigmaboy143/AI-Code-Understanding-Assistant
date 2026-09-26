@@ -580,6 +580,259 @@ No real LLM service or vector database is required — all tests use in-process 
 
 ---
 
+## Specialised Agents (`app/agents/`)
+
+These agents are focused analysis services.  They consume structured
+repository-intelligence context that **must be supplied by the caller** (or an
+upstream service/test fixture).  None of these agents scan the file system,
+parse source code, call an LLM, or connect to external services.
+
+> **Important:** The agents depend entirely on upstream repository intelligence.
+> They do not discover modules, files, relationships, tests, or documentation
+> on their own.
+
+---
+
+### Architecture Agent (`app/agents/architecture.py`)
+
+**Purpose:** Explain system/module boundaries, major components, dependency
+relationships, data flow, and entry points from supplied structured context.
+
+**Required input — `ArchitectureContext`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `modules` | `list[ModuleInfo]` | Named modules/packages with optional descriptions |
+| `files` | `list[str]` | Important file paths |
+| `symbols` | `list[str]` | Key symbol names |
+| `imports` | `list[str]` | Import statements/relationships |
+| `relationships` | `list[RelationshipInfo]` | Dependency/call-graph edges (`source`, `target`, `kind`) |
+| `services` | `list[ServiceInfo]` | Named services |
+| `apis` | `list[str]` | API surface definitions |
+| `documentation` | `str \| None` | Architecture documentation text |
+| `entry_points` | `list[str]` | Known entry points |
+
+**Output — `ArchitectureResult`:**
+- `overview` — plain-language overview (from `documentation` if supplied; else derived from modules/services)
+- `components` — identified components with `kind` (`module`, `service`, `file`, `entry_point`) and `ConfidenceLevel`
+- `entry_points` — from `context.entry_points`
+- `dependency_relationships` — from `context.relationships`
+- `data_flow_summary` — rendered from relationships; `None` if none supplied
+- `limitations` — what could not be determined
+- `confidence` — `CONFIRMED` when context is supplied; `UNKNOWN` when empty
+
+**Evidence behaviour:**
+- `CONFIRMED`: component or relationship is directly present in the supplied context
+- `UNKNOWN`: no context supplied for that aspect
+- Evidence items reference only supplied fields (FILE source type for modules/services/files)
+- `git_commit` evidence is never fabricated
+
+**Limitations:**
+- Does not scan the repository or parse code
+- Does not infer undeclared dependencies
+- Does not generate data-flow diagrams
+- Cannot determine architecture aspects absent from the supplied context
+
+**Usage:**
+
+```python
+from app.agents.architecture import ArchitectureAgent, ArchitectureContext, ModuleInfo, RelationshipInfo
+
+agent = ArchitectureAgent()
+ctx = ArchitectureContext(
+    modules=[ModuleInfo(name="api", description="HTTP layer"), ModuleInfo(name="db")],
+    relationships=[RelationshipInfo(source="api", target="db", kind="dependency")],
+    entry_points=["src/main.py"],
+)
+result = agent.analyse(ctx)
+# result.overview, result.components, result.dependency_relationships, result.confidence
+```
+
+---
+
+### Documentation Agent (`app/agents/documentation.py`)
+
+**Purpose:** Answer questions from supplied documentation.  The agent never
+crawls the internet or invents undocumented behaviour.
+
+**Required input — `DocumentationContext`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `readme` | `str \| None` | README content |
+| `markdown_files` | `dict[str, str]` | `{filename: content}` Markdown documents |
+| `docstrings` | `dict[str, str]` | `{symbol: docstring}` mapping |
+| `api_docs` | `str \| None` | API documentation text |
+| `architecture_notes` | `str \| None` | Architecture documentation text |
+| `config_docs` | `str \| None` | Configuration documentation text |
+| `question` | `str \| None` | Optional question to answer |
+
+**Output — `DocumentationResult`:**
+- `answer` — the answer from the supplied docs, or `"UNKNOWN: ..."` when docs don't answer
+- `relevant_sections` — documentation sections that contributed to the answer
+- `documented_facts` — facts explicitly stated in the supplied documentation
+- `limitations` — what the agent cannot determine
+- `confidence` — `CONFIRMED` when a matching source was found; `UNKNOWN` when not
+
+**Evidence behaviour:**
+- `CONFIRMED`: answer found in at least one supplied documentation source
+- `UNKNOWN`: no documentation supplied, or question not answerable from docs
+- Evidence source type is `DOCUMENTATION`
+- No evidence is ever fabricated
+
+**UNKNOWN behaviour:**
+- Empty context → `"UNKNOWN: No documentation was supplied."`
+- Question not found in any doc → `"UNKNOWN: The supplied documentation does not answer: '...'"`
+
+**Limitations:**
+- Keyword-based matching only; no semantic search
+- Cannot answer questions about undocumented behaviour
+- Does not crawl the internet or file system
+
+**Usage:**
+
+```python
+from app.agents.documentation import DocumentationAgent, DocumentationContext
+
+agent = DocumentationAgent()
+ctx = DocumentationContext(
+    readme="# MyProject\nA REST API for code analysis.",
+    question="What is MyProject?",
+)
+result = agent.analyse(ctx)
+# result.answer, result.confidence.level → ConfidenceLevel.CONFIRMED
+```
+
+---
+
+### Test Agent (`app/agents/test_agent.py`)
+
+**Purpose:** Explain what tests exist and what behaviour they verify, using
+only the supplied test context.  The agent never runs a test parser, infers
+coverage, or fabricates test behaviour.
+
+**Required input — `SuiteContext`** (also exported as `TestContext`)**:**
+
+| Field | Type | Description |
+|---|---|---|
+| `test_names` | `list[str]` | Test function/method names |
+| `test_code` | `dict[str, str]` | `{test_name: source_code}` |
+| `test_descriptions` | `dict[str, str]` | `{test_name: description}` |
+| `target_symbol` | `str \| None` | Symbol under test |
+| `target_file` | `str \| None` | File under test |
+| `coverage_info` | `str \| None` | Supplied coverage information |
+| `question` | `str \| None` | Optional question about tests |
+
+**Output — `SuiteAnalysisResult`** (also exported as `TestResult`)**:**
+- `overview` — summary of the test suite
+- `tests` — per-test summaries (`name`, `description`, `has_code`, `confidence`)
+- `target_symbol` / `target_file` — from the supplied context
+- `coverage_summary` — from `coverage_info`; `"UNKNOWN: ..."` when not supplied
+- `related_tests` — tests related to `target_symbol`/`target_file`
+- `answer` — answer to the question; `"UNKNOWN: ..."` when unanswerable
+- `limitations` — what was missing
+- `confidence` — `CONFIRMED` when test context supplied; `UNKNOWN` when empty
+
+**Evidence behaviour:**
+- `CONFIRMED`: test names/code/descriptions directly supplied
+- `UNKNOWN`: no test context provided
+- Evidence source type is `TEST`
+- Coverage is `UNKNOWN` unless `coverage_info` is explicitly supplied
+
+**Limitations:**
+- Does not run tests or measure coverage
+- Does not parse test code to extract assertions
+- Cannot explain why a test exists unless a description is supplied
+
+**Usage:**
+
+```python
+from app.agents.test_agent import TestAgent, SuiteContext as TestContext
+
+agent = TestAgent()
+ctx = TestContext(
+    test_names=["test_login_success", "test_login_failure"],
+    test_descriptions={"test_login_success": "Verifies valid credentials succeed."},
+    target_symbol="login",
+    coverage_info="82% line coverage",
+)
+result = agent.analyse(ctx)
+# result.overview, result.tests, result.related_tests, result.coverage_summary
+```
+
+---
+
+### Repository Onboarding Agent (`app/agents/onboarding.py`)
+
+**Purpose:** Generate a structured onboarding guide for a developer who is
+unfamiliar with the repository.  Uses only the supplied repository-intelligence
+context; never invents project purpose, architecture, workflows, or deployment
+processes.
+
+**Required input — `OnboardingContext`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `project_name` | `str \| None` | Project/repository name |
+| `project_description` | `str \| None` | Short description of the project |
+| `language` | `str \| None` | Primary programming language |
+| `modules` | `list[str]` | Named modules/packages |
+| `files` | `list[str]` | Important file paths |
+| `entry_points` | `list[str]` | Known entry points |
+| `documentation` | `str \| None` | Documentation text (README, wiki, etc.) |
+| `tests` | `list[str]` | Test names or test file paths |
+| `development_commands` | `dict[str, str]` | Known commands (e.g. `{"test": "pytest"}`) |
+| `dependencies` | `list[str]` | Known external dependencies |
+
+**Output — `OnboardingResult`:**
+- `project_overview` — from `project_name` + `project_description` + `language`; falls back to `documentation` excerpt; `UNKNOWN` when absent
+- `entry_points` — from `context.entry_points`
+- `major_components` — from `context.modules`
+- `important_files` — from `context.files`
+- `development_flow` — from `context.development_commands`; `UNKNOWN` when not supplied
+- `documentation_references` — from `context.documentation`
+- `test_references` — from `context.tests`
+- `suggested_starting_points` — derived from supplied context
+- `sections` — all eight onboarding sections with `ConfidenceLevel` annotations
+- `limitations` — missing aspects explicitly noted
+- `confidence` — `CONFIRMED` when any context supplied; `UNKNOWN` when empty
+
+**Evidence behaviour:**
+- `CONFIRMED`: fact directly supplied in context
+- `UNKNOWN`: required information absent
+- Evidence items reference supplied files, documentation, tests, and commands
+- No evidence is ever fabricated
+
+**UNKNOWN behaviour:**
+- Absent field → corresponding section has `confidence = ConfidenceLevel.UNKNOWN`
+- Each limitation is explicitly recorded in `result.limitations`
+
+**Limitations:**
+- Does not scan the file system
+- Does not infer project purpose beyond what is supplied
+- Suggested starting points are derived solely from supplied context
+- Cannot determine deployment process unless explicitly supplied
+
+**Usage:**
+
+```python
+from app.agents.onboarding import OnboardingAgent, OnboardingContext
+
+agent = OnboardingAgent()
+ctx = OnboardingContext(
+    project_name="CodeAnalyser",
+    project_description="A REST API for automated code analysis.",
+    language="Python",
+    modules=["api", "db"],
+    entry_points=["src/main.py"],
+    development_commands={"test": "pytest tests/", "lint": "ruff check ."},
+)
+result = agent.onboard(ctx)
+# result.project_overview, result.suggested_starting_points, result.sections
+```
+
+---
+
 ## Current limitations
 
 - **Only Ollama** is supported as a provider (`PROVIDER=ollama`).
@@ -592,8 +845,13 @@ No real LLM service or vector database is required — all tests use in-process 
 - **No numeric confidence score** — there is no real calculation to back one up.
 - **No automatic Git reasoning** — Git history, commits, and PRs are not inferred;
   `git_commit` evidence type is reserved but never auto-populated.
-- **No automatic test evidence** — `test` evidence type is reserved but never auto-populated.
+- **No automatic test evidence** — the Test Agent consumes supplied test context only;
+  it does not discover or parse tests from the file system.
 - **Context builder** — `extra_sections` is always empty; Git, test, and architecture
   context are extension points for future milestones.
-- **No specialised agents** — single-turn LLM call only.
+- **Agents require upstream intelligence** — Architecture, Documentation, Test, and
+  Onboarding agents consume pre-supplied context; they do not scan repositories themselves.
+  An upstream repository-intelligence service must supply the structured context.
 - **No embedding service** — semantic/vector search is not implemented.
+- **Documentation Agent uses keyword matching** — question answering is keyword-based,
+  not semantic; complex or indirect questions may not be answered correctly.
