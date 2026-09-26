@@ -1,16 +1,26 @@
 import { Module } from '@nestjs/common';
 import { AnalysisController } from './analysis.controller.js';
 import { AnalysisService } from './analysis.service.js';
+import { AiEngineAdapterProvider } from './adapters/ai-engine.adapter.js';
+import { AiEngineClient } from './adapters/ai-engine.client.js';
+import {
+  AI_ENGINE_CONFIG,
+  createAiEngineConfig,
+} from './config/ai-engine.config.js';
 import { ANALYSIS_PROVIDER } from './interfaces/analysis-provider.interface.js';
-import { NullAnalysisProvider } from './providers/null-analysis.provider.js';
 
 @Module({
   controllers: [AnalysisController],
   providers: [
     AnalysisService,
+    AiEngineClient,
+    {
+      provide: AI_ENGINE_CONFIG,
+      useFactory: createAiEngineConfig,
+    },
     {
       provide: ANALYSIS_PROVIDER,
-      useClass: NullAnalysisProvider,
+      useClass: AiEngineAdapterProvider,
     },
   ],
   exports: [AnalysisService],
