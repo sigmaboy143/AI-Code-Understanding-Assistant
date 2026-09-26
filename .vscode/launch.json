@@ -1,13 +1,22 @@
-// A launch configuration that compiles the extension and then opens it inside a new window
-// Use IntelliSense to learn about possible attributes.
-// Hover to view descriptions of existing attributes.
-// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+// Launch configuration for the AI Code Understanding Assistant VS Code extension.
+//
+// HOW TO RUN:
+//   Press F5  →  VS Code compiles the extension (via the default build task = npm run watch)
+//               and opens a new "Extension Development Host" window with the extension loaded.
+//
+// DO NOT run individual .ts source files with Code Runner or ts-node.
+// Extension files import "vscode" which is only available inside the VS Code Extension Host
+// process — they cannot be executed as standalone scripts.
+//
+// WEBVIEW UI:
+//   The React panel (webview-ui/) must be built at least once before F5:
+//     Terminal → Run Task → build-webview   (or: cd webview-ui && npm run build)
+//   After that, the built dist/ is bundled into the extension and served automatically.
 {
 	"version": "0.2.0",
 	"configurations": [
-		
 		{
-			"name": "Run Extension",
+			"name": "Run Extension (F5)",
 			"type": "extensionHost",
 			"request": "launch",
 			"args": [
@@ -16,6 +25,7 @@
 			"outFiles": [
 				"${workspaceFolder}/out/**/*.js"
 			],
+			"sourceMaps": true,
 			"preLaunchTask": "${defaultBuildTask}"
 		}
 	]

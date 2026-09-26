@@ -16,7 +16,7 @@ export class AiCodePanel {
   // ── Factory for a standalone editor panel ──────────────────────────────────
   static createOrShow(
     extensionUri: vscode.Uri,
-    onMessage: (msg: WebviewToExtensionMessage) => void
+    onMessage: (msg: WebviewToExtensionMessage) => void,
   ): AiCodePanel {
     const column = vscode.window.activeTextEditor
       ? vscode.ViewColumn.Beside
@@ -34,9 +34,11 @@ export class AiCodePanel {
       column,
       {
         enableScripts: true,
-        localResourceRoots: [vscode.Uri.joinPath(extensionUri, "webview-ui", "dist")],
+        localResourceRoots: [
+          vscode.Uri.joinPath(extensionUri, "webview-ui", "dist"),
+        ],
         retainContextWhenHidden: true,
-      }
+      },
     );
 
     const instance = new AiCodePanel(panel, extensionUri, onMessage);
@@ -47,7 +49,7 @@ export class AiCodePanel {
   constructor(
     panel: vscode.WebviewPanel | vscode.WebviewView,
     private readonly _extensionUri: vscode.Uri,
-    onMessage: (msg: WebviewToExtensionMessage) => void
+    onMessage: (msg: WebviewToExtensionMessage) => void,
   ) {
     this._panel = panel;
     this._messageHandler = onMessage;
@@ -56,7 +58,7 @@ export class AiCodePanel {
     this._panel.webview.onDidReceiveMessage(
       (msg: WebviewToExtensionMessage) => this._messageHandler?.(msg),
       null,
-      this._disposables
+      this._disposables,
     );
 
     if ("onDidDispose" in this._panel) {
@@ -80,7 +82,11 @@ export class AiCodePanel {
   }
 
   private _getHtml(webview: vscode.Webview): string {
-    const distUri = vscode.Uri.joinPath(this._extensionUri, "webview-ui", "dist");
+    const distUri = vscode.Uri.joinPath(
+      this._extensionUri,
+      "webview-ui",
+      "dist",
+    );
     const indexPath = path.join(distUri.fsPath, "index.html");
 
     // ── Serve the built React app ──────────────────────────────────────────
@@ -89,10 +95,10 @@ export class AiCodePanel {
 
       // Build vscode-resource URIs for each asset
       const scriptUri = webview.asWebviewUri(
-        vscode.Uri.joinPath(distUri, "assets", "index.js")
+        vscode.Uri.joinPath(distUri, "assets", "index.js"),
       );
       const styleUri = webview.asWebviewUri(
-        vscode.Uri.joinPath(distUri, "assets", "index.css")
+        vscode.Uri.joinPath(distUri, "assets", "index.css"),
       );
 
       // CSP: allow scripts only from our extension dist + inline nonce
@@ -174,13 +180,13 @@ export class AiCodeSidePanelProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    private readonly _onMessage: (msg: WebviewToExtensionMessage) => void
+    private readonly _onMessage: (msg: WebviewToExtensionMessage) => void,
   ) {}
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _ctx: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
+    _token: vscode.CancellationToken,
   ) {
     webviewView.webview.options = {
       enableScripts: true,
@@ -192,7 +198,7 @@ export class AiCodeSidePanelProvider implements vscode.WebviewViewProvider {
     const panel = new AiCodePanel(
       webviewView,
       this._extensionUri,
-      this._onMessage
+      this._onMessage,
     );
 
     // Register the side panel as the active messaging target
