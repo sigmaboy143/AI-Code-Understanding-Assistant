@@ -833,6 +833,296 @@ result = agent.onboard(ctx)
 
 ---
 
+---
+
+### Code Explanation Agent (`app/agents/explanation.py`)
+
+**Purpose:** Explain submitted source code using only the supplied code, retrieved
+context chunks, and optional supplementary context.  The agent answers the user's
+question, describes visible control/data flow, and summarises what the code does.
+
+**Required input — `ExplanationContext`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `source_code` | `str` | The source code to explain (required) |
+| `language` | `ProgrammingLanguage` | Language label |
+| `file_path` | `str \| None` | Optional repository-relative path |
+| `question` | `str \| None` | Optional question to answer |
+| `analyses` | `list[AnalysisType]` | Optional analysis-type hints |
+| `retrieved_chunks` | `list[IncludedChunk]` | Pre-selected context chunks |
+| `user_context` | `str \| None` | Optional supplementary context text |
+
+**Output — `ExplanationResult`:**
+- `overview` — high-level description of what the code does
+- `details` — longer walkthrough (from LLM response, when longer than overview)
+- `flow_steps` — visible control/data flow steps detected in the code
+- `question_answer` — answer to the supplied question; `"UNKNOWN: ..."` when unanswerable
+- `limitations` — what the agent cannot determine from the supplied context
+- `confidence` — `CONFIRMED` when source code is supplied; `UNKNOWN` when code is empty
+
+**Evidence behaviour:**
+- `CONFIRMED`: source code and/or retrieved chunks are supplied
+- `UNKNOWN`: source code is empty/blank
+- Evidence items reference submitted source code and retrieved chunks
+- No Git evidence is ever fabricated
+
+**Flow step extraction:**
+- Detects `def`, `class`, `return`, `raise`, `if`/`elif`, `for`/`while` at the visible
+  source level using simple line heuristics (no AST)
+- Only constructs visibly present in the supplied code are described
+- Capped at 20 steps
+
+**LLM provider:**
+- When a provider is injected: `overview`, `details`, and `question_answer` are drawn
+  from the LLM completion
+- When no provider is injected: deterministic fallback using code line count and language
+- Tests use `MockProvider` — no real LLM is called
+
+**Limitations:**
+- Does not scan the repository or build a dependency graph
+- Does not run the code or execute tests
+- No AST parsing is performed
+- Claims are not individually mapped to evidence items (free-text LLM response)
+- Control/data flow is described textually from the visible code surface only
+
+**Usage:**
+
+```python
+from app.agents.explanation import ExplanationAgent, ExplanationContext
+from app.providers.mock import MockProvider
+from app.schemas.code_understanding import ProgrammingLanguage
+
+agent = ExplanationAgent(provider=MockProvider(response_text="Adds two numbers."))
+ctx = ExplanationContext(
+    source_code="def add(a, b):\n    return a + b",
+    language=ProgrammingLanguage.PYTHON,
+    file_path="src/math.py",
+    question="What does add() return?",
+)
+result = await agent.explain(ctx)
+# result.overview, result.flow_steps, result.question_answer, result.confidence
+```
+
+---
+
+### WHY / Git Reasoning Agent (`app/agents/git_reasoning.py`)
+
+**Purpose:** Explain documented reasons for a code change using ONLY the Git context
+that is explicitly supplied.  The agent never fabricates commits, authors, dates,
+PRs, issues, or historical events.
+
+> **Important:** Git context is supplied externally.  The agent performs no Git
+> operations and does not scan the repository.
+
+**Required input — `GitContext`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `commit_hash` | `str \| None` | Commit SHA (informational only) |
+| `commit_message` | `str \| None` | Commit message text |
+| `diff` | `str \| None` | Raw diff text |
+| `changed_files` | `list[str]` | Changed file paths |
+| `issue_text` | `str \| None` | Linked issue description |
+| `pr_text` | `str \| None` | Linked PR description |
+| `code_before` | `str \| None` | Code before the change |
+| `code_after` | `str \| None` | Code after the change |
+| `related_context` | `str \| None` | Other relevant context text |
+
+**Output — `GitReasoningResult`:**
+- `why_summary` — why the change was made; `"UNKNOWN: ..."` when undeterminable
+- `documented_reasons` — reasons directly stated in commit message, PR, or issue
+- `inferred_reasons` — reasons inferred from diff or code structure
+- `reasoning_chain` — ordered steps with source attribution and confidence level
+- `limitations` — what the agent cannot determine from the supplied context
+- `confidence` — `CONFIRMED` / `INFERRED` / `UNKNOWN` (see rules below)
+
+**Confidence rules:**
+
+| Situation | Level |
+|---|---|
+| Reason directly stated in commit message / PR / issue | `CONFIRMED` |
+| Reason reasoned from diff or code change (not explicitly stated) | `INFERRED` |
+| No useful context supplied | `UNKNOWN` |
+
+**Evidence behaviour:**
+- `GIT_COMMIT` source type for commit message, issue, and PR evidence
+- `SOURCE_CODE` source type for diff and code-change evidence
+- `FILE` source type for changed-file evidence
+- No evidence is ever fabricated — only supplied fields generate evidence items
+
+**NEVER fabricates:**
+- Commit hashes, authors, or dates
+- PR or issue numbers or titles beyond what is supplied
+- Author motives or historical events
+
+**Limitations:**
+- Git context must be supplied externally; no Git parsing or repository scanning
+- Only the most recent supplied context is analysed; multi-commit history is not
+  reconstructed
+- Inferences are structural (line counts, diff patterns); no semantic understanding
+  of intent beyond keywords visible in the diff
+
+**Usage:**
+
+```python
+from app.agents.git_reasoning import GitReasoningAgent, GitContext
+
+agent = GitReasoningAgent()
+ctx = GitContext(
+    commit_message="Fix: handle None input in process()",
+    diff="- if value:\n+ if value is not None:",
+    issue_text="Null pointer error when value is falsy but not None.",
+)
+result = agent.analyse(ctx)
+# result.why_summary, result.documented_reasons, result.confidence.level
+```
+
+---
+
+### Debug Agent (`app/agents/debug_impact.py` — `DebugAgent`)
+
+**Purpose:** Identify the likely failure location and root cause of an error using
+only the supplied error message, stack trace, source code, and retrieved context.
+
+**Required input — `DebugContext`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `error_message` | `str` | The error/exception message (required) |
+| `stack_trace` | `str \| None` | Full stack trace text |
+| `source_code` | `str \| None` | Relevant source code |
+| `retrieved_chunks` | `list[IncludedChunk]` | Retrieved context chunks |
+| `recent_changes` | `str \| None` | Optional recent-change description |
+| `file_path` | `str \| None` | Repository-relative path |
+
+**Flow:**
+```
+Error message
+    ↓
+Stack trace / source code / retrieved chunks
+    ↓
+Evidence
+    ↓
+Root cause reasoning
+    ↓
+DebugResult
+```
+
+**Output — `DebugResult`:**
+- `error_summary` — truncated error message (≤ 200 chars)
+- `likely_locations` — failure locations extracted from the stack trace
+- `root_cause` — likely root cause; `"UNKNOWN: ..."` when evidence is insufficient
+- `investigation_steps` — suggested next investigation/fix direction
+- `limitations` — what the agent cannot determine
+- `confidence` — `CONFIRMED` (stack+code), `INFERRED` (partial), `UNKNOWN` (message only)
+
+**Evidence and confidence behaviour:**
+
+| Supplied | Confidence |
+|---|---|
+| Stack trace + source code | `CONFIRMED` |
+| Stack trace only or source code only | `INFERRED` |
+| Error message only | `UNKNOWN` |
+
+**Common error heuristics (deterministic, no LLM):**
+- `AttributeError` → suggests None dereference
+- `TypeError` → suggests type mismatch
+- `KeyError` → suggests missing dict key
+- `IndexError` → suggests list out of range
+- `ImportError` / `ModuleNotFoundError` → suggests missing module
+- `ValueError` → suggests invalid argument
+- `NameError` → suggests undefined variable
+
+**Limitations:**
+- Does not execute code or reproduce the error
+- Stack-trace location extraction uses Python-style frame parsing only
+- No AST analysis is performed
+- Root cause inference is heuristic when no LLM provider is injected
+
+**Usage:**
+
+```python
+from app.agents.debug_impact import DebugAgent, DebugContext
+from app.providers.mock import MockProvider
+
+agent = DebugAgent(provider=MockProvider(response_text="The value is None."))
+ctx = DebugContext(
+    error_message="AttributeError: 'NoneType' object has no attribute 'strip'",
+    stack_trace='  File "src/processor.py", line 42, in process\n    result = value.strip()',
+    source_code="def process(value):\n    result = value.strip()\n    return result",
+)
+result = await agent.analyse(ctx)
+# result.likely_locations, result.root_cause, result.investigation_steps, result.confidence
+```
+
+---
+
+### Impact Analysis Agent (`app/agents/debug_impact.py` — `ImpactAgent`)
+
+**Purpose:** Identify directly and indirectly affected components when code changes,
+using only the supplied dependency/relationship context and test context.
+
+> **Important:** Dependency relationships are supplied externally.  The agent does
+> not parse source code or build a dependency graph.
+
+**Required input — `ImpactContext`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `changed_component` | `str` | Name of the changed component (required) |
+| `changed_code` | `str \| None` | The changed source code |
+| `relationships` | `list[ComponentRelationship]` | Supplied dependency relationships |
+| `test_names` | `list[str]` | Supplied test names |
+| `test_file_paths` | `list[str]` | Supplied test file paths |
+
+**`ComponentRelationship` fields:** `source`, `target`, `kind`, `description`
+
+**Output — `ImpactResult`:**
+- `changed_component` — the changed component name
+- `directly_affected` — components with a direct dependency on the changed component
+- `indirectly_affected` — components one transitive hop away (INFERRED)
+- `related_tests` — from supplied `test_names` or `test_file_paths`
+- `impact_summary` — plain-language summary; `"UNKNOWN: ..."` when no relationships
+- `limitations` — what the agent cannot determine
+- `confidence` — `CONFIRMED` (relationships supplied), `INFERRED` (tests only), `UNKNOWN` (nothing)
+
+**Evidence and confidence behaviour:**
+
+| Supplied | Confidence |
+|---|---|
+| Relationships | `CONFIRMED` (direct); `INFERRED` (indirect) |
+| Tests only (no relationships) | `INFERRED` |
+| Nothing | `UNKNOWN` |
+
+**Limitations:**
+- Does not build a dependency parser or scan the repository
+- Only one level of transitive relationships is explored (direct dependants of
+  direct dependants)
+- Deeper transitive chains are not analysed because the supplied data may be incomplete
+- If `relationships` is empty, both `directly_affected` and `indirectly_affected` are
+  always empty — impact is `UNKNOWN`
+
+**Usage:**
+
+```python
+from app.agents.debug_impact import ImpactAgent, ImpactContext, ComponentRelationship
+
+agent = ImpactAgent()
+ctx = ImpactContext(
+    changed_component="UserService",
+    relationships=[
+        ComponentRelationship(source="AuthController", target="UserService"),
+        ComponentRelationship(source="OrderService", target="UserService"),
+    ],
+    test_names=["test_create_user", "test_delete_user"],
+)
+result = agent.analyse(ctx)
+# result.directly_affected, result.indirectly_affected, result.related_tests
+```
+
+---
+
 ## Current limitations
 
 - **Only Ollama** is supported as a provider (`PROVIDER=ollama`).
@@ -843,15 +1133,30 @@ result = agent.onboard(ctx)
 - **No LLM confidence scoring** — confidence is derived from the presence of
   retrieved chunks or submitted source code, not from any model self-assessment.
 - **No numeric confidence score** — there is no real calculation to back one up.
-- **No automatic Git reasoning** — Git history, commits, and PRs are not inferred;
-  `git_commit` evidence type is reserved but never auto-populated.
+- **Git context is supplied externally** — the WHY/Git Reasoning Agent does not
+  perform any Git operations.  Callers must supply `commit_message`, `diff`,
+  `issue_text`, `pr_text`, or `code_before`/`code_after` explicitly.
+- **Dependency relationships are supplied externally** — the Impact Analysis Agent
+  does not parse source code or build a dependency graph.  Callers must supply
+  `ComponentRelationship` objects.
+- **Unsupported information becomes UNKNOWN** — when the required context is absent
+  the agents return `"UNKNOWN"` rather than fabricating data.
+- **No repository or Git scanning** — none of the agents (Explanation, Git Reasoning,
+  Debug, or Impact) scan the file system, run Git commands, or parse code beyond
+  simple line-level heuristics.
 - **No automatic test evidence** — the Test Agent consumes supplied test context only;
   it does not discover or parse tests from the file system.
 - **Context builder** — `extra_sections` is always empty; Git, test, and architecture
   context are extension points for future milestones.
-- **Agents require upstream intelligence** — Architecture, Documentation, Test, and
-  Onboarding agents consume pre-supplied context; they do not scan repositories themselves.
+- **Agents require upstream intelligence** — Architecture, Documentation, Test,
+  Onboarding, Explanation, Git Reasoning, Debug, and Impact agents consume
+  pre-supplied context; they do not scan repositories themselves.
   An upstream repository-intelligence service must supply the structured context.
 - **No embedding service** — semantic/vector search is not implemented.
 - **Documentation Agent uses keyword matching** — question answering is keyword-based,
   not semantic; complex or indirect questions may not be answered correctly.
+- **Explanation Agent flow steps** — control/data flow detection uses line-level
+  heuristics only; complex patterns (nested closures, generators, decorators) may
+  not be fully captured.
+- **Debug Agent stack trace parsing** — designed for Python-style tracebacks;
+  other languages' stack trace formats may not be fully parsed.
