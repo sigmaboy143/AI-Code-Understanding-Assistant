@@ -20,6 +20,7 @@ import { TestsModule } from './tests/tests.module.js';
 import { ExplanationsModule } from './explanations/explanations.module.js';
 import { ConversationsModule } from './conversations/conversations.module.js';
 import { OnboardingModule } from './onboarding/onboarding.module.js';
+import { HealthModule } from './health/health.module.js';
 import { createValidationPipe } from './common/validation/validation-pipe.js';
 
 @Module({
@@ -42,6 +43,7 @@ import { createValidationPipe } from './common/validation/validation-pipe.js';
     ExplanationsModule,
     ConversationsModule,
     OnboardingModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [

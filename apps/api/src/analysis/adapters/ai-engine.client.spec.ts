@@ -196,3 +196,179 @@ describe('AiEngineClient', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 5 — readiness probe (additive; post() above is untouched)
+// ---------------------------------------------------------------------------
+
+const READINESS_URL = 'http://test-ai-engine/ready';
+
+/** Responds ok with a json() spy, so body parsing can be detected. */
+function mockFetchReady(status: number): () => unknown {
+  const json = jest.fn(() => Promise.resolve({ status: 'ready' }));
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: status >= 200 && status < 300,
+    status,
+    json,
+  } as unknown as Response);
+  return json;
+}
+
+describe('AiEngineClient.checkReadiness', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  // 1. Successful 2xx
+  it('resolves on HTTP 200', async () => {
+    mockFetchReady(200);
+    await expect(makeClient().checkReadiness()).resolves.toBeUndefined();
+  });
+
+  it('resolves on HTTP 204 (2xx with no body)', async () => {
+    mockFetchReady(204);
+    await expect(makeClient().checkReadiness()).resolves.toBeUndefined();
+  });
+
+  // 2. Method
+  it('uses GET method', async () => {
+    mockFetchReady(200);
+    await makeClient().checkReadiness();
+    expect(global.fetch).toHaveBeenCalledWith(
+      READINESS_URL,
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  // 3. Target URL
+  it('targets {baseUrl}/ready', async () => {
+    mockFetchReady(200);
+    await makeClient().checkReadiness();
+    expect(global.fetch).toHaveBeenCalledWith(
+      READINESS_URL,
+      expect.any(Object),
+    );
+  });
+
+  // 4. No request body
+  it('sends no request body', async () => {
+    mockFetchReady(200);
+    await makeClient().checkReadiness();
+    expect(global.fetch).toHaveBeenCalledWith(
+      READINESS_URL,
+      expect.not.objectContaining({ body: expect.anything() }),
+    );
+  });
+
+  // 5. No unnecessary Content-Type
+  it('sends no Content-Type header', async () => {
+    mockFetchReady(200);
+    await makeClient().checkReadiness();
+    expect(global.fetch).toHaveBeenCalledWith(
+      READINESS_URL,
+      expect.not.objectContaining({ headers: expect.anything() }),
+    );
+  });
+
+  // 6–9. Non-2xx status mapping reuses the existing STATUS_TO_CODE table
+  it('maps HTTP 503 to provider_unavailable', async () => {
+    mockFetchReady(503);
+    await expectClientError(makeClient().checkReadiness(), 'provider_unavailable');
+  });
+
+  it('maps HTTP 504 to provider_timeout', async () => {
+    mockFetchReady(504);
+    await expectClientError(makeClient().checkReadiness(), 'provider_timeout');
+  });
+
+  it('maps HTTP 502 to provider_error', async () => {
+    mockFetchReady(502);
+    await expectClientError(makeClient().checkReadiness(), 'provider_error');
+  });
+
+  it('maps HTTP 500 to internal_error', async () => {
+    mockFetchReady(500);
+    await expectClientError(makeClient().checkReadiness(), 'internal_error');
+  });
+
+  it('maps an unmapped status (418) to internal_error', async () => {
+    mockFetchReady(418);
+    await expectClientError(makeClient().checkReadiness(), 'internal_error');
+  });
+
+  // 10. Network failure
+  it('maps a rejected fetch to network_error', async () => {
+    mockFetchThrow(new TypeError('Failed to fetch'));
+    await expectClientError(makeClient().checkReadiness(), 'network_error');
+  });
+
+  // 11. AbortError → timeout
+  it('maps AbortError to timeout', async () => {
+    jest.useFakeTimers();
+
+    const abortError = new DOMException('The operation was aborted.', 'AbortError');
+    global.fetch = jest.fn().mockImplementation(
+      (_url: unknown, options: { signal?: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => reject(abortError));
+        }),
+    );
+
+    const promise = makeClient().checkReadiness();
+    jest.advanceTimersByTime(TEST_CONFIG.timeoutMs + 100);
+
+    await expectClientError(promise, 'timeout');
+  });
+
+  // 12. Timer cleanup
+  it('clears the timeout timer on success', async () => {
+    jest.useFakeTimers();
+    mockFetchReady(200);
+
+    await makeClient().checkReadiness();
+
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('clears the timeout timer on failure', async () => {
+    jest.useFakeTimers();
+    mockFetchThrow(new TypeError('Failed to fetch'));
+
+    await expectClientError(makeClient().checkReadiness(), 'network_error');
+
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('clears the timeout timer on a non-2xx response', async () => {
+    jest.useFakeTimers();
+    mockFetchReady(503);
+
+    await expectClientError(makeClient().checkReadiness(), 'provider_unavailable');
+
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  // 13. Body is never parsed
+  it('never parses the response body on success', async () => {
+    const json = mockFetchReady(200);
+
+    await makeClient().checkReadiness();
+
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it('never parses the response body on failure and captures no upstream message', async () => {
+    const json = mockFetchReady(503);
+
+    try {
+      await makeClient().checkReadiness();
+      throw new Error('Expected rejection');
+    } catch (err: unknown) {
+      expect(err).toBeInstanceOf(AiEngineClientError);
+      // No upstream text is retained, so nothing can leak through the client.
+      expect((err as AiEngineClientError).upstreamMessage).toBeUndefined();
+    }
+    expect(json).not.toHaveBeenCalled();
+  });
+});

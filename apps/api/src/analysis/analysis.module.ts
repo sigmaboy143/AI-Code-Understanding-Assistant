@@ -23,6 +23,6 @@ import { ANALYSIS_PROVIDER } from './interfaces/analysis-provider.interface.js';
       useClass: AiEngineAdapterProvider,
     },
   ],
-  exports: [AnalysisService],
+  exports: [AnalysisService, AiEngineClient, AI_ENGINE_CONFIG],
 })
 export class AnalysisModule {}
