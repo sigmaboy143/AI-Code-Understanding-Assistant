@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_PIPE } from '@nestjs/core';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -19,6 +20,7 @@ import { TestsModule } from './tests/tests.module.js';
 import { ExplanationsModule } from './explanations/explanations.module.js';
 import { ConversationsModule } from './conversations/conversations.module.js';
 import { OnboardingModule } from './onboarding/onboarding.module.js';
+import { createValidationPipe } from './common/validation/validation-pipe.js';
 
 @Module({
   imports: [
@@ -42,6 +44,18 @@ import { OnboardingModule } from './onboarding/onboarding.module.js';
     OnboardingModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Application-wide validation. Registering the pipe as an APP_PIPE provider
+    // keeps the options in one place: createValidationPipe() is the single
+    // source of truth for them, so they can never drift from
+    // validation-pipe.ts or be redefined per-controller. Prefer this over
+    // useGlobalPipes() in main.ts, which would leave the pipe untestable and
+    // invisible to module-scoped Test.createTestingModule() harnesses.
+    {
+      provide: APP_PIPE,
+      useFactory: createValidationPipe,
+    },
+  ],
 })
 export class AppModule {}
