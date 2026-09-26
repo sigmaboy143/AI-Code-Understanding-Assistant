@@ -31,14 +31,12 @@ export class MessagingService {
     this._panel?.postMessage(msg);
   }
 
-  /** Handle a message received FROM the webview. */
-  async handle(msg: WebviewToExtensionMessage, context: vscode.ExtensionContext) {
-    const config = vscode.workspace.getConfiguration("aicode");
-    const useMock = config.get<boolean>("useMockData", true);
-    const backendUrl = config.get<string>("backendUrl", "http://localhost:3000");
-
+  /** Handle infrastructure messages received FROM the webview (navigate, ready). */
+  async handle(msg: WebviewToExtensionMessage) {
     switch (msg.type) {
       case "ready": {
+        const config = vscode.workspace.getConfiguration("aicode");
+        const useMock = config.get<boolean>("useMockData", true);
         const ctx = getCodeContext();
         if (ctx) {
           this.send({ type: "setContext", payload: ctx });
@@ -67,8 +65,6 @@ export class MessagingService {
       }
 
       default:
-        // All other messages are forwarded to the backend/mock service
-        // by the ApiService which is called from commands.
         break;
     }
   }

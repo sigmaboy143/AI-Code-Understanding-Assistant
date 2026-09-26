@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { ExtensionToWebviewMessage, WebviewToExtensionMessage } from "../types";
+import { MessagingService } from "../messaging/MessagingService";
 
 /**
  * Manages the AI Code Understanding side panel (webview).
@@ -69,6 +70,7 @@ export class AiCodePanel {
 
   dispose() {
     AiCodePanel.currentPanel = undefined;
+    MessagingService.getInstance().unregisterPanel();
     if ("dispose" in this._panel) {
       (this._panel as vscode.WebviewPanel).dispose();
     }
@@ -81,29 +83,53 @@ export class AiCodePanel {
     const distUri = vscode.Uri.joinPath(this._extensionUri, "webview-ui", "dist");
     const indexPath = path.join(distUri.fsPath, "index.html");
 
-    // Serve built React app
+    // ── Serve the built React app ──────────────────────────────────────────
     if (fs.existsSync(indexPath)) {
-      let html = fs.readFileSync(indexPath, "utf8");
-      // Rewrite asset paths to vscode-resource: URIs
-      html = html.replace(/(src|href)="\/([^"]+)"/g, (_match, attr, p) => {
-        const assetUri = webview.asWebviewUri(
-          vscode.Uri.joinPath(distUri, p)
-        );
-        return `${attr}="${assetUri}"`;
-      });
-      return html;
+      const nonce = getNonce();
+
+      // Build vscode-resource URIs for each asset
+      const scriptUri = webview.asWebviewUri(
+        vscode.Uri.joinPath(distUri, "assets", "index.js")
+      );
+      const styleUri = webview.asWebviewUri(
+        vscode.Uri.joinPath(distUri, "assets", "index.css")
+      );
+
+      // CSP: allow scripts only from our extension dist + inline nonce
+      // Allow styles from extension dist + unsafe-inline (needed for React inline styles)
+      const csp = [
+        `default-src 'none'`,
+        `script-src 'nonce-${nonce}' ${webview.cspSource}`,
+        `style-src 'unsafe-inline' ${webview.cspSource}`,
+        `img-src ${webview.cspSource} data:`,
+        `font-src ${webview.cspSource}`,
+        `connect-src 'none'`,
+      ].join("; ");
+
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="${csp}" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Code Understanding</title>
+  <link rel="stylesheet" href="${styleUri}" />
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
     }
 
-    // Fallback: inline loading placeholder (shown until webview-ui is built)
+    // ── Fallback: shown when webview-ui is not built yet ──────────────────
     const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none';
-             style-src 'unsafe-inline';
-             script-src 'nonce-${nonce}';" />
+    content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Code Understanding</title>
   <style>
@@ -125,6 +151,7 @@ export class AiCodePanel {
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     p { opacity: 0.6; font-size: 12px; }
+    code { font-family: monospace; background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px; }
   </style>
 </head>
 <body>
@@ -168,12 +195,12 @@ export class AiCodeSidePanelProvider implements vscode.WebviewViewProvider {
       this._onMessage
     );
 
-    // Expose postMessage on the side-panel view for the messaging service
-    (webviewView as any)._aiPanel = panel;
+    // Register the side panel as the active messaging target
+    MessagingService.getInstance().registerPanel(panel);
   }
 }
 
-function getNonce() {
+function getNonce(): string {
   let text = "";
   const possible =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
