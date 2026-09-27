@@ -35,45 +35,31 @@ import json
 import httpx
 import pytest
 
-from app.providers.base import LLMMessage, LLMRequest, ProviderError
+from app.providers.base import LLMRequest, ProviderError
 from app.providers.ollama import OllamaProvider
+from tests.fixtures import (
+    CHAT_URL,
+    FIXTURE_MODEL,
+    VALID_OLLAMA_BODY,
+    analysis_llm_request,
+    install_transport,
+    ollama_provider,
+)
 
-CHAT_URL = "http://ollama.test:11434/api/chat"
-
-VALID_BODY: dict = {
-    "model": "qwen3:8b",
-    "message": {"role": "assistant", "content": "It returns the sum."},
-    "done": True,
-    "done_reason": "stop",
-}
+#: Re-exported so existing call sites in this module keep reading naturally.
+VALID_BODY = VALID_OLLAMA_BODY
 
 
 def _provider(timeout: int = 120) -> OllamaProvider:
-    return OllamaProvider(
-        base_url="http://ollama.test:11434",
-        model="qwen3:8b",
-        timeout=timeout,
-    )
+    return ollama_provider(timeout=timeout)
 
 
 def _request() -> LLMRequest:
-    return LLMRequest(
-        messages=[
-            LLMMessage(role="system", content="You analyse code."),
-            LLMMessage(role="user", content="def add(a, b): return a + b"),
-        ]
-    )
+    return analysis_llm_request()
 
 
 def _patch_client(monkeypatch, handler) -> None:
-    """Force every ``httpx.AsyncClient`` built by the provider to use *handler*."""
-    real_client = httpx.AsyncClient
-
-    def factory(*args, **kwargs):
-        kwargs.pop("transport", None)
-        return real_client(*args, transport=httpx.MockTransport(handler), **kwargs)
-
-    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    install_transport(monkeypatch, handler)
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +105,7 @@ async def test_request_payload_matches_the_ollama_chat_schema(monkeypatch):
     await _provider().complete(_request())
 
     payload = json.loads(seen[0].content)
-    assert payload["model"] == "qwen3:8b"
+    assert payload["model"] == FIXTURE_MODEL
     assert payload["stream"] is False
     assert [m["role"] for m in payload["messages"]] == ["system", "user"]
     assert "options" not in payload

@@ -28,6 +28,9 @@ What is provided
 ``grounding_inputs``
     Retrieved chunks, supplied context, and synthetic log output used to
     exercise evidence grounding.
+``ollama_transport``
+    Scripted HTTP transports for the *real* ``OllamaProvider``, so upstream
+    failure conditions can be exercised without a socket.
 ``expected_outputs``
     Hand-written expectations — grounded dependency names, confidence levels,
     fabrication tripwires — used by the evaluation layer.
@@ -84,13 +87,30 @@ from .grounding_inputs import (
     MALFORMED_CHUNK_CONTENT,
     chunk_list,
 )
+from .ollama_transport import (
+    CHAT_URL,
+    FIXTURE_MODEL,
+    MODEL_NOT_FOUND_BODY,
+    NO_CONTENT_BODY,
+    NO_MESSAGE_BODY,
+    NON_JSON_BODY,
+    OLLAMA_TEST_BASE_URL,
+    VALID_OLLAMA_BODY,
+    analysis_llm_request,
+    connect_error,
+    install_transport,
+    install_upstream,
+    ollama_provider,
+)
 from .provider_responses import (
     DEPENDENCY_CLAIM_TEXT,
     ERROR_EXPLANATION_TEXT,
     EXPLANATION_TEXT,
     GIT_FACT_CLAIM_TEXT,
     IMPROVEMENT_TEXT,
+    ONBOARDING_QUESTION_TEXT,
     STRUCTURE_TEXT,
+    UNSUPPORTED_RELATIONSHIP_CLAIM_TEXT,
     WHITESPACE_TEXT,
 )
 
@@ -110,13 +130,29 @@ __all__ = [
     "EXPLANATION_TEXT",
     "GIT_FACT_CLAIM_TEXT",
     "IMPROVEMENT_TEXT",
+    "ONBOARDING_QUESTION_TEXT",
     "STRUCTURE_TEXT",
+    "UNSUPPORTED_RELATIONSHIP_CLAIM_TEXT",
     "WHITESPACE_TEXT",
     # Grounding inputs
     "EXTERNAL_CHUNK",
     "INTERNAL_CHUNK",
     "MALFORMED_CHUNK_CONTENT",
     "chunk_list",
+    # Ollama transport
+    "CHAT_URL",
+    "FIXTURE_MODEL",
+    "MODEL_NOT_FOUND_BODY",
+    "NO_CONTENT_BODY",
+    "NO_MESSAGE_BODY",
+    "NON_JSON_BODY",
+    "OLLAMA_TEST_BASE_URL",
+    "VALID_OLLAMA_BODY",
+    "analysis_llm_request",
+    "connect_error",
+    "install_transport",
+    "install_upstream",
+    "ollama_provider",
     # Expected outputs
     "CONFIDENCE_LEVELS",
     "EXPECTED_CONFIRMED_LEVEL",

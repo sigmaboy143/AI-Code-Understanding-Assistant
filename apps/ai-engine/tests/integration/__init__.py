@@ -24,12 +24,21 @@ Scope of this package
     Confidence determination and evidence attribution through the orchestrator.
 ``test_dependency_grounding_api``
     Dependency grounding as observed over HTTP.
+``test_e2e_user_scenarios``
+    Whole user journeys — explain, why, relationships, impact, debug,
+    onboarding — asserted end to end through the real stack.
+``test_failure_states``
+    The eight documented failure states, each provoked for real and asserted to
+    fail gracefully.
 
 Boundary
 --------
 No test in this package requires a running Ollama instance, a network
 connection, or an LLM.  The live end-to-end path is not reproducible on CI
-hardware and is therefore verified separately; see the Phase 13 report.
+hardware and is therefore verified separately; see the Phase 13 report.  The
+one live blocker — ``qwen3:8b`` generation that cannot finish inside the read
+timeout — is owned by the provider architecture phase and is deliberately not
+re-attempted here.
 
 Not collected here
 ------------------

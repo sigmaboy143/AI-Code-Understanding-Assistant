@@ -5,12 +5,15 @@ confidence tests run in milliseconds and produce identical results on every
 machine.  They are intentionally plain: no model was asked for anything, and
 none of this text should be treated as an authoritative analysis.
 
-Two of the constants are deliberately *wrong* in a specific way:
+Three of the constants are deliberately *wrong* in a specific way:
 
 - ``DEPENDENCY_CLAIM_TEXT`` names a library that the accompanying snippet does
   **not** import.  It is used to prove that a textual model claim never becomes
   a structured dependency.
 - ``WHITESPACE_TEXT`` is blank.  It is used to prove the fallback-summary path.
+- ``UNSUPPORTED_RELATIONSHIP_CLAIM_TEXT`` names downstream services that were
+  never supplied.  It is used to prove that a relationship the caller never
+  provided cannot become structured output.
 
 ``MALFORMED_BODY`` is not a string at all — it is the shape a provider returns
 when its upstream JSON is unparseable, so the provider layer can be exercised
@@ -67,4 +70,25 @@ GIT_FACT_CLAIM_TEXT = (
 
 Used to prove the engine never fabricates Git or test evidence, and that a
 free-text answer carrying such claims is still reported as UNKNOWN confidence.
+"""
+
+UNSUPPORTED_RELATIONSHIP_CLAIM_TEXT = (
+    "This module is tightly coupled to the billing service and the "
+    "notification worker, and changing it requires a coordinated release."
+)
+"""FABRICATED relationships: two named downstream services that were never
+supplied, plus a release process that does not exist.
+
+Used by the relationship/context scenario to prove that naming a system the
+caller never mentioned produces no structured output and no evidence item.
+"""
+
+ONBOARDING_QUESTION_TEXT = (
+    "I am new to this project. How do I get started, and what should I read "
+    "first?"
+)
+"""A realistic new-developer question, used by the onboarding scenario.
+
+The public API has no onboarding route, so this question is what a caller
+actually sends — through the ordinary explanation analysis — to ask for it.
 """

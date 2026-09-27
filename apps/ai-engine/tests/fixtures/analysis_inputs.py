@@ -84,6 +84,12 @@ def _request(
 
     ``overrides`` is applied last, so a caller can replace any field of the
     intent-specific default (for example ``language`` or ``file_path``).
+
+    Each builder below therefore folds its own defaults into ``overrides``
+    *before* calling this function, rather than passing them alongside it.
+    Passing both would raise ``TypeError: got multiple values for keyword
+    argument`` the moment a caller tried to override that field, which would
+    silently make the documented override contract unusable.
     """
     values: dict[str, object] = {
         "source_code": source_code,
@@ -105,11 +111,12 @@ def explanation_input(
     so one builder serves both the "explanation only" and "every analysis"
     cases without duplicating the payload.
     """
+    values: dict[str, object] = {"file_path": SIMPLE_FILE_PATH}
+    values.update(overrides)
     return _request(
         source_code,
         [AnalysisType.EXPLANATION] if analyses is None else analyses,
-        file_path=SIMPLE_FILE_PATH,
-        **overrides,
+        **values,
     )
 
 
@@ -118,13 +125,20 @@ def error_explanation_input(
     analyses: list[AnalysisType] | None = None,
     **overrides: object,
 ) -> CodeUnderstandingRequest:
-    """Request asking for an error explanation, with a synthetic trace."""
+    """Request asking for an error explanation, with a synthetic trace.
+
+    The default ``context`` is the synthetic trace and its caller note; pass
+    ``context=`` to replace it.
+    """
+    values: dict[str, object] = {
+        "file_path": SIMPLE_FILE_PATH,
+        "context": ERROR_CONTEXT + ERROR_LOG,
+    }
+    values.update(overrides)
     return _request(
         source_code,
         [AnalysisType.ERROR_EXPLANATION] if analyses is None else analyses,
-        file_path=SIMPLE_FILE_PATH,
-        context=ERROR_CONTEXT + ERROR_LOG,
-        **overrides,
+        **values,
     )
 
 
@@ -134,11 +148,12 @@ def structure_input(
     **overrides: object,
 ) -> CodeUnderstandingRequest:
     """Request asking for a structural outline."""
+    values: dict[str, object] = {"file_path": SIMPLE_FILE_PATH}
+    values.update(overrides)
     return _request(
         source_code,
         [AnalysisType.STRUCTURE] if analyses is None else analyses,
-        file_path=SIMPLE_FILE_PATH,
-        **overrides,
+        **values,
     )
 
 
@@ -148,11 +163,12 @@ def dependencies_input(
     **overrides: object,
 ) -> CodeUnderstandingRequest:
     """Request asking for dependencies, over a snippet with two stdlib imports."""
+    values: dict[str, object] = {"file_path": SIMPLE_FILE_PATH}
+    values.update(overrides)
     return _request(
         source_code,
         [AnalysisType.DEPENDENCIES] if analyses is None else analyses,
-        file_path=SIMPLE_FILE_PATH,
-        **overrides,
+        **values,
     )
 
 
@@ -162,9 +178,10 @@ def improvements_input(
     **overrides: object,
 ) -> CodeUnderstandingRequest:
     """Request asking for improvement suggestions."""
+    values: dict[str, object] = {"file_path": SIMPLE_FILE_PATH}
+    values.update(overrides)
     return _request(
         source_code,
         [AnalysisType.IMPROVEMENTS] if analyses is None else analyses,
-        file_path=SIMPLE_FILE_PATH,
-        **overrides,
+        **values,
     )
