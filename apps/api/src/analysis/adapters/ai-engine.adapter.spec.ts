@@ -14,7 +14,13 @@ import {
   type AiEngineClientErrorCode,
 } from './ai-engine.client.js';
 import type { AnalysisRequest } from '../interfaces/analysis-provider.interface.js';
-import type { AiEngineResponseContract } from '../contracts/ai-engine-response.contract.js';
+import type { AiEngineAnalysisType } from '../contracts/ai-engine-request.contract.js';
+import type {
+  AiEngineConfidenceLevel,
+  AiEngineEvidenceItem,
+  AiEngineEvidenceSourceType,
+  AiEngineResponseContract,
+} from '../contracts/ai-engine-response.contract.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,10 +44,10 @@ const BASE_RESPONSE: AiEngineResponseContract = {
   summary: 'Assigns a constant.',
   metadata: { language: 'typescript', file_path: 'src/index.ts', analyses: [] },
   confidence: {
-    level: 'HIGH',
+    level: 'CONFIRMED',
     evidence: [
       {
-        source_type: 'semantic_analysis',
+        source_type: 'source_code',
         file_path: 'src/index.ts',
         line_start: 1,
         line_end: 1,
@@ -49,7 +55,7 @@ const BASE_RESPONSE: AiEngineResponseContract = {
         description: 'Variable declaration found.',
       },
     ],
-    notes: 'High confidence response.',
+    notes: 'Directly supported by the submitted source code.',
   },
   explanation: null,
   structure: null,
@@ -58,6 +64,21 @@ const BASE_RESPONSE: AiEngineResponseContract = {
 };
 
 // ---------------------------------------------------------------------------
+
+/** BASE_RESPONSE with its single evidence item overridden. */
+function withEvidence(
+  patch: Partial<AiEngineEvidenceItem>,
+): AiEngineResponseContract {
+  return {
+    ...BASE_RESPONSE,
+    confidence: {
+      ...BASE_RESPONSE.confidence,
+      evidence: [
+        { ...BASE_RESPONSE.confidence.evidence[0]!, ...patch },
+      ],
+    },
+  };
+}
 
 describe('AiEngineAdapterProvider', () => {
   // ── Request mapping ──────────────────────────────────────────────────────
@@ -112,12 +133,66 @@ describe('AiEngineAdapterProvider', () => {
     );
   });
 
-  it('always sends analyses: []', async () => {
+  // ── analyses ──────────────────────────────────────────────────────────────
+  //
+  // CodeUnderstandingRequest.analyses has min_length=1, so `[]` is rejected by
+  // the AI Engine with 422. NestJS has no explicit analysis selection, so the
+  // key must be absent and the AI Engine must apply its own default of all five
+  // AnalysisType values.
+
+  it('omits analyses entirely — no explicit selection exists in AnalysisRequest', async () => {
     const post = jest.fn().mockResolvedValue(BASE_RESPONSE);
     await makeAdapter(post).analyzeCode(BASE_REQUEST);
-    expect(post).toHaveBeenCalledWith(
-      expect.objectContaining({ analyses: [] }),
-    );
+    const sent = post.mock.calls[0]![0] as Record<string, unknown>;
+    expect('analyses' in sent).toBe(false);
+    expect(Object.keys(sent).sort()).toEqual([
+      'context',
+      'file_path',
+      'language',
+      'question',
+      'source_code',
+    ]);
+  });
+
+  it('never sends analyses: []', async () => {
+    const post = jest.fn().mockResolvedValue(BASE_RESPONSE);
+    await makeAdapter(post).analyzeCode(BASE_REQUEST);
+    const sent = post.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sent.analyses).not.toEqual([]);
+  });
+
+  it('omits analyses for every AnalysisRequest shape', async () => {
+    const requests: AnalysisRequest[] = [
+      BASE_REQUEST,
+      { ...BASE_REQUEST, filePath: undefined, context: undefined },
+      { requestId: 'r', language: 'python', code: 'x = 1' },
+    ];
+    for (const request of requests) {
+      const post = jest.fn().mockResolvedValue(BASE_RESPONSE);
+      await makeAdapter(post).analyzeCode(request);
+      const sent = post.mock.calls[0]![0] as Record<string, unknown>;
+      expect('analyses' in sent).toBe(false);
+    }
+  });
+
+  it('the five AnalysisType values remain the valid contract set', () => {
+    // Compile-time and runtime assertion that the contract union is exactly the
+    // AI Engine's AnalysisType enum. An invalid value is a type error.
+    const all: AiEngineAnalysisType[] = [
+      'explanation',
+      'error_explanation',
+      'structure',
+      'dependencies',
+      'improvements',
+    ];
+    expect(all).toHaveLength(5);
+    expect([...all].sort()).toEqual([
+      'dependencies',
+      'error_explanation',
+      'explanation',
+      'improvements',
+      'structure',
+    ]);
   });
 
   // ── Response mapping ─────────────────────────────────────────────────────
@@ -163,15 +238,16 @@ describe('AiEngineAdapterProvider', () => {
   });
 
   // ── Confidence mapping ────────────────────────────────────────────────────
+  //
+  // The AI Engine's ConfidenceLevel enum is CONFIRMED | INFERRED | UNKNOWN.
+  // Each is preserved as a distinct level; none is collapsed into high/medium.
 
   it.each([
-    ['HIGH', 'high'],
-    ['MEDIUM', 'medium'],
-    ['LOW', 'low'],
+    ['CONFIRMED', 'confirmed'],
+    ['INFERRED', 'inferred'],
     ['UNKNOWN', 'unknown'],
-    ['SOMETHING_ELSE', 'unknown'],
   ] as const)(
-    'normalises confidence level %s → %s',
+    'preserves AI Engine confidence level %s → %s',
     async (raw, expected) => {
       const response = {
         ...BASE_RESPONSE,
@@ -182,6 +258,66 @@ describe('AiEngineAdapterProvider', () => {
       expect(result.confidence.level).toBe(expected);
     },
   );
+
+  it('does not collapse CONFIRMED into high', async () => {
+    const response = {
+      ...BASE_RESPONSE,
+      confidence: { ...BASE_RESPONSE.confidence, level: 'CONFIRMED' },
+    };
+    const post = jest.fn().mockResolvedValue(response);
+    const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+    expect(result.confidence.level).not.toBe('high');
+    expect(result.confidence.level).toBe('confirmed');
+  });
+
+  it('does not collapse INFERRED into medium', async () => {
+    const response = {
+      ...BASE_RESPONSE,
+      confidence: { ...BASE_RESPONSE.confidence, level: 'INFERRED' },
+    };
+    const post = jest.fn().mockResolvedValue(response);
+    const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+    expect(result.confidence.level).not.toBe('medium');
+    expect(result.confidence.level).toBe('inferred');
+  });
+
+  it.each([
+    ['HIGH', 'high'],
+    ['MEDIUM', 'medium'],
+    ['LOW', 'low'],
+    ['SOMETHING_ELSE', 'unknown'],
+  ] as const)(
+    'retains pre-existing mapping %s → %s',
+    async (raw, expected) => {
+      // 'HIGH' | 'MEDIUM' | 'LOW' | 'SOMETHING_ELSE' are NOT part of the AI
+      // Engine's current ConfidenceLevel enum. They are cast in deliberately to
+      // prove the legacy mapping is retained for providers that predate the
+      // three-state contract, and that unrecognised input stays 'unknown'.
+      const response = {
+        ...BASE_RESPONSE,
+        confidence: {
+          ...BASE_RESPONSE.confidence,
+          level: raw as AiEngineConfidenceLevel,
+        },
+      };
+      const post = jest.fn().mockResolvedValue(response);
+      const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+      expect(result.confidence.level).toBe(expected);
+    },
+  );
+
+  it('accepts lowercase confidence levels from the wire', async () => {
+    const response = {
+      ...BASE_RESPONSE,
+      confidence: {
+        ...BASE_RESPONSE.confidence,
+        level: 'inferred' as AiEngineConfidenceLevel,
+      },
+    };
+    const post = jest.fn().mockResolvedValue(response);
+    const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+    expect(result.confidence.level).toBe('inferred');
+  });
 
   it('score is always undefined — AI Engine provides no numeric score', async () => {
     const post = jest.fn().mockResolvedValue(BASE_RESPONSE);
@@ -243,7 +379,7 @@ describe('AiEngineAdapterProvider', () => {
   it('preserves source_type in structured field', async () => {
     const post = jest.fn().mockResolvedValue(BASE_RESPONSE);
     const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
-    expect(result.evidence[0]?.sourceType).toBe('semantic_analysis');
+    expect(result.evidence[0]?.sourceType).toBe('source_code');
   });
 
   it('preserves file_path in structured field', async () => {
@@ -293,40 +429,86 @@ describe('AiEngineAdapterProvider', () => {
     expect(result.evidence[0]?.detail).toContain('lines:1-1');
   });
 
-  it('maps semantic source_type to kind: semantic', async () => {
-    const post = jest.fn().mockResolvedValue(BASE_RESPONSE); // source_type: 'semantic_analysis'
+  it('maps source_type to kind by identity — never inventing a bucket', async () => {
+    const post = jest.fn().mockResolvedValue(BASE_RESPONSE); // source_type: 'source_code'
     const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
-    expect(result.evidence[0]?.kind).toBe('semantic');
+    expect(result.evidence[0]?.kind).toBe('source_code');
   });
 
-  it('maps syntax source_type to kind: syntax', async () => {
-    const response = {
-      ...BASE_RESPONSE,
-      confidence: {
-        ...BASE_RESPONSE.confidence,
-        evidence: [
-          { ...BASE_RESPONSE.confidence.evidence[0]!, source_type: 'ast_parser' },
-        ],
-      },
-    };
-    const post = jest.fn().mockResolvedValue(response);
+  it('does not classify source_code as syntax', async () => {
+    const post = jest.fn().mockResolvedValue(BASE_RESPONSE);
     const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
-    expect(result.evidence[0]?.kind).toBe('syntax');
+    expect(result.evidence[0]?.kind).not.toBe('syntax');
   });
 
-  it('maps unrecognised source_type to kind: ai', async () => {
-    const response = {
-      ...BASE_RESPONSE,
-      confidence: {
-        ...BASE_RESPONSE.confidence,
-        evidence: [
-          { ...BASE_RESPONSE.confidence.evidence[0]!, source_type: 'llm_reasoning' },
-        ],
-      },
-    };
+  it('does not classify documentation as semantic', async () => {
+    const response = withEvidence({ source_type: 'documentation' });
     const post = jest.fn().mockResolvedValue(response);
     const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
-    expect(result.evidence[0]?.kind).toBe('ai');
+    expect(result.evidence[0]?.kind).toBe('documentation');
+    expect(result.evidence[0]?.kind).not.toBe('semantic');
+  });
+
+  it.each([
+    'source_code',
+    'retrieved_chunk',
+    'file',
+    'documentation',
+    'test',
+    'git_commit',
+  ] as const)('preserves AI Engine source type %s verbatim', async (sourceType) => {
+    const post = jest.fn().mockResolvedValue(withEvidence({ source_type: sourceType }));
+    const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+    expect(result.evidence[0]?.sourceType).toBe(sourceType);
+    expect(result.evidence[0]?.kind).toBe(sourceType);
+  });
+
+  it('no AI Engine source type is classified as ai', async () => {
+    const all: AiEngineEvidenceSourceType[] = [
+      'source_code',
+      'retrieved_chunk',
+      'file',
+      'documentation',
+      'test',
+      'git_commit',
+    ];
+    for (const sourceType of all) {
+      const post = jest
+        .fn()
+        .mockResolvedValue(withEvidence({ source_type: sourceType }));
+      const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+      expect(result.evidence[0]?.kind).not.toBe('ai');
+    }
+  });
+
+  it('does not fabricate evidence — only the AI Engine evidence is emitted', async () => {
+    const response = withEvidence({ source_type: 'source_code' });
+    const post = jest.fn().mockResolvedValue(response);
+    const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+    expect(result.evidence).toHaveLength(1);
+    expect(
+      result.evidence.filter(
+        (e) => e.sourceType === 'test' || e.sourceType === 'git_commit',
+      ),
+    ).toEqual([]);
+  });
+
+  it('never invents test or git_commit evidence when none was supplied', async () => {
+    const response = withEvidence({ source_type: 'source_code' });
+    const post = jest.fn().mockResolvedValue(response);
+    const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+    expect(result.evidence.map((e) => e.sourceType)).toEqual(['source_code']);
+  });
+
+  it('handles a null description without stringifying null', async () => {
+    const response = withEvidence({
+      source_type: 'source_code',
+      description: null,
+    });
+    const post = jest.fn().mockResolvedValue(response);
+    const result = await makeAdapter(post).analyzeCode(BASE_REQUEST);
+    expect(result.evidence[0]?.detail).not.toContain('null');
+    expect(result.evidence[0]?.detail).toContain('file:src/index.ts');
   });
 
   // ── Nullable AI fields ────────────────────────────────────────────────────

@@ -42,7 +42,7 @@ import type { AiEngineResponseContract } from './contracts/ai-engine-response.co
 const AI_ENGINE_RESPONSE: AiEngineResponseContract = {
   summary: 'A simple log statement.',
   metadata: { language: 'typescript', file_path: null, analyses: [] },
-  confidence: { level: 'LOW', evidence: [], notes: '' },
+  confidence: { level: 'UNKNOWN', evidence: [], notes: '' },
   explanation: null,
   structure: null,
   dependencies: null,
@@ -92,8 +92,9 @@ function expectedAnalysisBody(requestId: string): Record<string, unknown> {
     relationships: [],
     summary: 'A simple log statement.',
     // score, model and reasoning are undefined in the adapter and therefore
-    // absent from the serialised body. Only the normalised level survives.
-    confidence: { level: 'low' },
+    // absent from the serialised body. Only the normalised level survives —
+    // 'unknown' is the AI Engine's UNKNOWN level, preserved verbatim.
+    confidence: { level: 'unknown' },
     evidence: [],
     analysedAt: expect.any(String) as unknown,
   };

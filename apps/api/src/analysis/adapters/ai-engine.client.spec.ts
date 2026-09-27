@@ -6,7 +6,7 @@ import type { LogEntry } from '../../common/logging/log-sink.js';
 import type { LogSink } from '../../common/logging/log-sink.js';
 import { runWithCorrelation } from '../../common/correlation/request-correlation.js';
 import type { AiEngineConfig } from '../config/ai-engine.config.js';
-import type { AiEngineRequestContract } from '../contracts/ai-engine-request.contract.js';
+import type { AiEngineAnalysisType, AiEngineRequestContract } from '../contracts/ai-engine-request.contract.js';
 import type { AiEngineResponseContract } from '../contracts/ai-engine-response.contract.js';
 
 // ---------------------------------------------------------------------------
@@ -23,13 +23,14 @@ const MINIMAL_REQUEST: AiEngineRequestContract = {
   file_path: null,
   question: null,
   context: null,
-  analyses: [],
+  // `analyses` is omitted: min_length=1 rejects [], and omitting it lets the
+  // AI Engine default to all five AnalysisType values.
 };
 
 const MINIMAL_RESPONSE: AiEngineResponseContract = {
   summary: 'A simple log statement.',
   metadata: { language: 'typescript', file_path: null, analyses: [] },
-  confidence: { level: 'LOW', evidence: [], notes: '' },
+  confidence: { level: 'UNKNOWN', evidence: [], notes: '' },
   explanation: null,
   structure: null,
   dependencies: null,
@@ -143,6 +144,53 @@ describe('AiEngineClient', () => {
       expect.any(String),
       expect.objectContaining({ body: JSON.stringify(MINIMAL_REQUEST) }),
     );
+  });
+
+  it('omits the analyses key from the serialised body', async () => {
+    mockFetchOk(MINIMAL_RESPONSE);
+    await makeClient().post(MINIMAL_REQUEST);
+    const init = (global.fetch as unknown as jest.Mock).mock.calls[0]![1];
+    const parsed = JSON.parse(
+      (init as { body: string }).body,
+    ) as Record<string, unknown>;
+    expect('analyses' in parsed).toBe(false);
+  });
+
+  it.each([
+    'explanation',
+    'error_explanation',
+    'structure',
+    'dependencies',
+    'improvements',
+  ] as const)('serialises the analysis type %s verbatim on the wire', async (value) => {
+    mockFetchOk(MINIMAL_RESPONSE);
+    const request: AiEngineRequestContract = {
+      ...MINIMAL_REQUEST,
+      analyses: [value],
+    };
+    await makeClient().post(request);
+    const init = (global.fetch as unknown as jest.Mock).mock.calls[0]![1];
+    const parsed = JSON.parse(
+      (init as { body: string }).body,
+    ) as { analyses: string[] };
+    expect(parsed.analyses).toEqual([value]);
+  });
+
+  it('serialises all five analysis types together', async () => {
+    mockFetchOk(MINIMAL_RESPONSE);
+    const all: AiEngineAnalysisType[] = [
+      'explanation',
+      'error_explanation',
+      'structure',
+      'dependencies',
+      'improvements',
+    ];
+    await makeClient().post({ ...MINIMAL_REQUEST, analyses: all });
+    const init = (global.fetch as unknown as jest.Mock).mock.calls[0]![1];
+    const parsed = JSON.parse(
+      (init as { body: string }).body,
+    ) as { analyses: string[] };
+    expect(parsed.analyses).toEqual(all);
   });
 
   // 5. Successful 200 response
