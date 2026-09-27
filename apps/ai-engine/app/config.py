@@ -1,7 +1,12 @@
 """Service configuration loaded from environment variables.
 
 All settings have safe development defaults.  No credentials are hard-coded:
-API keys and URLs must come from the environment (or a .env file).
+API keys and URLs must be supplied to the process by the shell, the service
+manager, or the container runtime.
+
+A ``.env`` file is **not** loaded: ``python-dotenv`` is not a dependency and
+only ``os.getenv`` is used below.  ``apps/ai-engine/.env.example`` is a
+reference/template listing these variables, not a runtime input.
 
 Usage::
 

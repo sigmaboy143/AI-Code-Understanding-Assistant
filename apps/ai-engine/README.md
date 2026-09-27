@@ -50,14 +50,51 @@ pip install -r requirements.txt
 
 ### 3. Configure environment variables
 
+The AI Engine reads configuration **only from the process environment**, via
+`os.getenv()` in `app/config.py`.
+
+> **`.env` is NOT loaded.** `python-dotenv` is not a dependency of this service,
+> so creating a `.env` file has no effect — the application will keep using the
+> built-in defaults. Configuration must be supplied by the shell, the service
+> manager, or the container runtime that starts the process.
+
+`.env.example` is a **reference/template**: it lists the supported variables and
+their default values. It is not read at runtime.
+
+**Windows (PowerShell)**
+
+```powershell
+$env:HOST               = "0.0.0.0"
+$env:PORT               = "8000"
+$env:PROVIDER           = "ollama"
+$env:MODEL              = "llama3"
+$env:PROVIDER_BASE_URL  = "http://localhost:11434"
+$env:REQUEST_TIMEOUT    = "60"
+# $env:PROVIDER_API_KEY  = "..."   # cloud providers only, not used by Ollama
+
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+**macOS / Linux (bash / zsh)**
+
 ```bash
-cp .env.example .env
-# Edit .env and fill in any values you need
+export HOST=0.0.0.0
+export PORT=8000
+export PROVIDER=ollama
+export MODEL=llama3
+export PROVIDER_BASE_URL=http://localhost:11434
+export REQUEST_TIMEOUT=60
+# export PROVIDER_API_KEY=...   # cloud providers only, not used by Ollama
+
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 ---
 
 ## Running the service
+
+Set the environment variables (see [Setup](#3-configure-environment-variables))
+in the same shell that starts the process, then run:
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -71,8 +108,10 @@ Interactive docs (Swagger UI): <http://localhost:8000/docs>
 
 ## Provider configuration
 
-All settings are read from environment variables (or a `.env` file).
-No credentials are hard-coded anywhere.
+All settings are read from environment variables supplied to the process.
+No credentials are hard-coded anywhere, and **no `.env` file is read** —
+`python-dotenv` is not a dependency. `.env.example` is a reference/template for
+the variables below, not a file the application consumes.
 
 | Variable           | Default                    | Description                                                           |
 |--------------------|----------------------------|-----------------------------------------------------------------------|
@@ -83,6 +122,32 @@ No credentials are hard-coded anywhere.
 | `PROVIDER_BASE_URL`| `http://localhost:11434`   | Base URL for self-hosted providers (Ollama)                           |
 | `REQUEST_TIMEOUT`  | `60`                       | Seconds to wait for a provider response before raising a 504 error   |
 | `PROVIDER_API_KEY` | *(not set)*                | API key for cloud providers (OpenAI, Anthropic). Not used for Ollama |
+
+> **Note:** `HOST` and `PORT` are read by `app/config.py`. When you start the
+> server with `uvicorn --host ... --port ...`, those CLI flags take precedence
+> over the variables.
+
+### Running with Docker
+
+The image takes its configuration from environment variables passed to the
+container. No `.env` file is copied into or read by the image.
+
+```bash
+cd apps/ai-engine
+docker build -t ai-engine .
+
+docker run --rm -p 8000:8000 \
+  -e HOST=0.0.0.0 \
+  -e PORT=8000 \
+  -e PROVIDER=ollama \
+  -e MODEL=llama3 \
+  -e PROVIDER_BASE_URL=http://host.docker.internal:11434 \
+  -e REQUEST_TIMEOUT=60 \
+  ai-engine
+```
+
+Add `-e PROVIDER_API_KEY=...` only for cloud providers. When Ollama runs on the
+host machine, `host.docker.internal` is used above so the container can reach it.
 
 ---
 
