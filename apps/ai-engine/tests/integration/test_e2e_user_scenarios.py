@@ -1,4 +1,4 @@
-﻿"""End-to-end user scenarios for the implemented developer-assistant capabilities.
+"""End-to-end user scenarios for the implemented developer-assistant capabilities.
 
 Category
 --------

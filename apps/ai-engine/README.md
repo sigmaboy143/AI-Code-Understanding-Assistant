@@ -641,7 +641,50 @@ cd apps/ai-engine
 python -m pytest tests/ -q
 ```
 
+Or from the repository root:
+
+```bash
+python -m pytest apps/ai-engine/tests -q
+```
+
 No real LLM service or vector database is required — all tests use in-process mocks.
+
+### Continuous integration
+
+`.github/workflows/ai-engine.yml` runs the checks above automatically. It is
+scoped to `apps/ai-engine/**` and is not a root repository workflow; the root
+pipeline belongs to the CI/CD owners.
+
+| Check | Command |
+|---|---|
+| Dependency install | `python -m pip install -r requirements.txt` |
+| Import | `python -c "from app.main import app"` |
+| Startup | build the ASGI app and call `/health` and `/ready` |
+| Tests | `python -m pytest tests -q` |
+| No live provider | the suite re-run with `PROVIDER_BASE_URL` pointed at an unroutable address |
+
+It runs on Python 3.11 and 3.13 — 3.11 is the floor documented above and the
+version `Dockerfile` ships; 3.13 is what contributors run locally.
+
+The workflow needs **no Ollama, no model weights, no API credentials, and no
+network access**. The last check enforces that rather than assuming it, so a
+test that starts reaching for a real provider fails in CI instead of passing
+here and breaking on a contributor's machine.
+
+The root workflow can reuse this job instead of repeating these steps:
+
+```yaml
+jobs:
+  ai-engine:
+    uses: sigmaboy143/AI-Code-Understanding-Assistant/.github/workflows/ai-engine.yml@main
+```
+
+### Secrets
+
+`.env.example` documents every supported variable and is the only `.env` file in
+the repository; real `.env` files are git-ignored. `PROVIDER_API_KEY` is read
+from the environment and never stored in the repository, and no API response
+includes it.
 
 ---
 

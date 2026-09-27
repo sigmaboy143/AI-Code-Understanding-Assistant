@@ -1,0 +1,149 @@
+name: AI Engine
+
+# ---------------------------------------------------------------------------
+# Scope
+# ---------------------------------------------------------------------------
+# This workflow verifies ONLY apps/ai-engine.  It is deliberately not a root
+# repository workflow: building, linting, and testing the NestJS API and the
+# VS Code extension belong to the root pipeline owned by Member 1 (CI) and
+# Member 4 (CI/CD).  Nothing here duplicates that work.
+#
+# Two ways to consume it
+# ----------------------
+# 1. Standalone (default).  The pull_request / push triggers below give the AI
+#    Engine a signal on its own, scoped to apps/ai-engine/** so it does not
+#    re-run work the root pipeline already covers.
+# 2. Composed.  The workflow_call trigger lets the root workflow run the exact
+#    same job as a step of a larger pipeline:
+#
+#        jobs:
+#          ai-engine:
+#            uses: sigmaboy143/AI-Code-Understanding-Assistant/.github/workflows/ai-engine.yml@main
+#
+#    Nothing needs to change in this file when that happens.
+#
+# Guarantees
+# ----------
+# - No Ollama, no model weights, no API credentials, and no network calls.
+#   The "no live provider" step below enforces this rather than asserting it:
+#   it re-runs the suite with the provider pointed at an unroutable address, so
+#   any future test that quietly reaches for a real provider fails in CI
+#   instead of passing here and breaking on a developer machine.
+# - No secrets are referenced, so there is nothing to leak and nothing for a
+#   fork pull request to withhold.
+#
+# Note for whoever sets up branch protection
+# ------------------------------------------
+# The standalone triggers below are path-filtered, which means this workflow
+# does not report a status on a pull request that touches no AI files.  A
+# required status check that never reports blocks the pull request forever.
+# So either
+#   (a) leave "AI Engine" out of the required-checks list while the workflow is
+#       path-filtered, or
+#   (b) compose this workflow from the root pipeline (workflow_call above) and
+#       require the root pipeline's job instead, which always reports.
+# Option (b) is the intended end state.
+# ---------------------------------------------------------------------------
+
+on:
+  # Reusable by the root pipeline — see "Two ways to consume it" above.
+  workflow_call:
+
+  # Standalone triggers, scoped to AI paths only.
+  pull_request:
+    paths:
+      - 'apps/ai-engine/**'
+      - '.github/workflows/ai-engine.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/ai-engine/**'
+      - '.github/workflows/ai-engine.yml'
+
+# The job only ever reads the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the in-flight run irrelevant.
+concurrency:
+  group: ai-engine-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  AI Engine:
+    name: AI Engine (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      # Report every version's result, not just the first failure.
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor declared in apps/ai-engine/README.md and the version
+        # apps/ai-engine/Dockerfile ships, so it is the one that must not rot.
+        # 3.13 is what contributors run locally; testing it catches a developer
+        # being broken before they open a pull request.
+        python-version: ['3.11', '3.13']
+
+    defaults:
+      run:
+        working-directory: apps/ai-engine
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: apps/ai-engine/requirements.txt
+
+      - name: Install AI Engine dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Show resolved dependency set
+        run: python -m pip list --format=columns
+
+      - name: Verify AI Engine imports
+        # Importing the app object is the cheapest proof that the package layout,
+        # the FastAPI wiring, and the schemas are all loadable.  A missing
+        # dependency or a bad relative import fails here in seconds rather than
+        # as a confusing collection error inside the test run.
+        run: python -c "from app.main import app; print('AI Engine import OK')"
+
+      - name: Verify application startup
+        # Instantiates the ASGI app through TestClient, which builds the real
+        # router and the real exception handlers without binding a port.
+        run: |
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from app.main import app
+
+          client = TestClient(app)
+          for path in ("/health", "/ready"):
+              response = client.get(path)
+              assert response.status_code in (200, 503), (path, response.status_code)
+              assert "error" in response.json() or "status" in response.json(), path
+              print(f"{path} -> {response.status_code}")
+          print("AI Engine startup OK")
+          PY
+
+      - name: Run AI Engine test suite
+        # Unit, integration, and evaluation tests in one run.  The suite is
+        # fully mocked and finishes in a few seconds.
+        run: python -m pytest tests -q
+
+      - name: Confirm no live provider is required
+        # Enforces the guarantee documented at the top of this file.  The
+        # provider base URL is RFC 5737 TEST-NET-1, which is permanently
+        # unroutable, and the model name is set to a real one to prove the
+        # suite never depends on weights being present.
+        env:
+          PROVIDER: ollama
+          MODEL: qwen3:8b
+          PROVIDER_BASE_URL: http://192.0.2.1:11434
+        run: python -m pytest tests -q

@@ -1,4 +1,4 @@
-﻿"""Failure-state testing for the AI Engine's public surface.
+"""Failure-state testing for the AI Engine's public surface.
 
 Category
 --------
