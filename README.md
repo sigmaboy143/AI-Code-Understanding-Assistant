@@ -38,11 +38,11 @@ directly.
 | Layer | State | Notes |
 |---|---|---|
 | NestJS backend | **Implemented** | Lint, build, 455 unit/integration tests, 5 E2E tests all pass |
-| AI Engine | **Separate branch** | Exists and is verified against, but not in this checkout |
+| AI Engine | **Implemented** | In `apps/ai-engine`, imported from `origin/feature/member3-ai` at `1c73b34`. Owned by Member 3 |
 | VS Code extension + React webview | **Separate branch** | Not in this checkout |
 | PostgreSQL | **Not implemented** | No code, no client, no migration |
 | Redis | **Not implemented** | No code, no client |
-| Docker | **Not implemented** | No Dockerfile, no compose file |
+| Docker | **Implemented** | `Dockerfile` per service + root `compose.yaml`. Local single-host stack only |
 | CI/CD | **Partial** | One workflow; backend only |
 
 ---
@@ -223,7 +223,56 @@ Full detail: [docs/development/environment.md](docs/development/environment.md).
 
 ## Local development
 
-Backend and AI Engine are developed and run independently.
+Two supported paths. The Compose path is recommended; the bare-metal path is
+kept for debugging.
+
+### Option A — Docker Compose (recommended)
+
+Requires **Docker Desktop**. Ollama stays on the **host** and is not
+containerised.
+
+**1. Start Ollama and confirm the model**
+
+```bash
+ollama serve
+ollama list              # must list llama3:latest
+```
+
+**2. Build and start the backend and the AI Engine**
+
+```bash
+docker compose up --build
+docker compose ps
+```
+
+**3. Verify**
+
+```bash
+curl http://localhost:3002/health     # {"status":"ok"}
+curl http://localhost:8002/health     # {"status":"ok"}
+```
+
+**4. Real end-to-end analysis** — this is the only check that proves the LLM
+path works, because it actually calls `llama3` on the host:
+
+```bash
+curl -X POST http://localhost:3002/analysis/code \
+  -H 'Content-Type: application/json' \
+  -d '{"language":"python","code":"def add(a, b):\n    return a + b\n"}'
+```
+
+Expect tens of seconds (~34s measured for `llama3` on CPU-only hardware).
+
+Shut down with `docker compose down`. Host ports default to `3002` / `8002` to
+avoid colliding with a local process on `3000` / `8000`; override with
+`API_HOST_PORT` / `AI_ENGINE_HOST_PORT` in a gitignored `.env`
+(`cp .env.example .env`).
+
+Full details: [deployment guide](docs/deployment/deployment-guide.md).
+
+### Option B — no containers
+
+Backend and AI Engine run directly on the host.
 
 **1. Start Ollama and pull the model**
 
@@ -232,7 +281,7 @@ ollama serve
 ollama pull llama3
 ```
 
-**2. Start the AI Engine** (in a checkout of `feature/member3-ai`)
+**2. Start the AI Engine**
 
 ```bash
 cd apps/ai-engine
@@ -240,7 +289,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-**3. Start the backend** (this repository)
+**3. Start the backend**
 
 ```bash
 cd apps/api
@@ -252,13 +301,20 @@ npm run start:dev
 
 ```bash
 curl http://127.0.0.1:8000/health     # {"status":"ok"}
-curl http://127.0.0.1:8000/ready      # readiness of the AI Engine itself
 curl http://127.0.0.1:3000/health     # {"status":"ok"} — no AI Engine needed
-curl http://127.0.0.1:3000/ready      # 200 only if the AI Engine is ready
 ```
 
-`/health` works with nothing else running. `/ready` is the real integration
-check.
+> **`/ready` is configuration readiness only.** The AI Engine's `/ready` makes
+> no LLM call — it checks only that `PROVIDER` is a non-empty string, so it
+> returns `200` even when Ollama is stopped or the model is missing. A `200`
+> from `/ready` is **not** proof that Ollama is working. Only a real analysis
+> request proves that. This is why the Compose healthchecks use `/health`.
+
+> **Use `llama3`, not `qwen3:8b`.** `qwen3:8b` is a thinking model whose
+> reasoning trace the AI Engine's provider discards, and no generation cap is
+> sent, so a live request cannot finish inside the read timeout and returns
+> `504`. It is a known, unfixed provider defect owned by Member 3, not a
+> networking or Compose fault.
 
 ---
 
@@ -345,12 +401,23 @@ Current posture, stated plainly:
 - `POST /explanations` always returns `detailed: undefined` and
   `referencedSymbols: []`.
 - The AI Engine's `dependencies` output is not read by the backend adapter.
-- The extension and AI Engine are not merged; there is no single-checkout
-  end-to-end run, and the extension's 30s client timeout is below the backend's
+- The extension is not merged, so there is no single-checkout run that includes
+  the VS Code client. The extension's 30s client timeout is below the backend's
   real ~34s latency.
 - AI answer quality has not been systematically evaluated.
-- No Docker, no deployment automation, no database.
-- CI covers the backend only.
+- Docker Compose is a **local, single-host development** stack only. No
+  deployment automation, no registry publishing, no database. It has no
+  authentication, no TLS, and no rate limiting, so it must not be exposed
+  beyond `localhost`.
+- Ollama is not containerised; it runs on the host and is reached from the
+  `ai-engine` container via `host.docker.internal`.
+- `GET /ready` on both services reports configuration readiness only. It never
+  contacts Ollama, so it is not evidence that the LLM path works.
+- `qwen3:8b` times out against a live provider (thinking model, discarded
+  reasoning trace, no generation cap). Unfixed, Member 3 owned. `llama3` is the
+  verified model.
+- CI covers the backend only. `.github/workflows/ai-engine.yml` exists on
+  `origin/feature/member3-ai` but is not on this branch.
 - The `context` request field has no maximum length, and `/explanations`
   performs no field validation of its own.
 

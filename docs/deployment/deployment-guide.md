@@ -1,10 +1,12 @@
 # Deployment Guide
 
-**Current state: manual startup only. No containerisation and no deployment
-automation exist in this repository.**
+**Current state: local Docker Compose stack for the backend and the AI Engine.
+No deployment automation exists.**
 
-This document describes how to run the services today. It does not describe a
-deployment pipeline, because there is not one.
+Compose is a **local, single-host development** stack, not a production
+deployment. There is no authentication, no TLS, and no rate limiting, so
+binding these ports to anything other than `localhost` exposes an unmetered,
+anonymous LLM proxy. See section 8.
 
 ---
 
@@ -14,9 +16,6 @@ Stated explicitly so nothing here is mistaken for existing capability:
 
 | Item | Status |
 |---|---|
-| `Dockerfile` (backend) | **Does not exist** |
-| `Dockerfile` (AI Engine) | **Does not exist** |
-| `docker-compose.yml` | **Does not exist** |
 | Kubernetes manifests / Helm | **Does not exist** |
 | Infrastructure-as-code (Terraform, Pulumi) | **Does not exist** |
 | Deployment pipeline (CD) | **Does not exist** |
@@ -24,8 +23,9 @@ Stated explicitly so nothing here is mistaken for existing capability:
 | Secrets manager integration | **Does not exist** |
 | Reverse proxy configuration | **Does not exist** |
 | TLS termination | **Does not exist** |
-
-A scan of every branch found no container or orchestration file anywhere.
+| Image registry publishing | **Does not exist** — images are built locally only |
+| Containerised Ollama | **Deliberately not done** — Ollama stays on the host |
+| Containerised extension / frontend | **Deliberately not done** |
 
 ---
 
@@ -33,139 +33,184 @@ A scan of every branch found no container or orchestration file anywhere.
 
 | Item | Status |
 |---|---|
+| `compose.yaml` (root) | Backend + AI Engine, two services, healthchecked |
+| `Dockerfile` (backend, `apps/api`) | Multi-stage; non-root `node` user; image `HEALTHCHECK` |
+| `Dockerfile` (AI Engine, `apps/ai-engine`) | Single-stage; non-root `appuser` UID 10001 |
+| `.dockerignore` for both build contexts | Excludes `node_modules/`, `dist/`, `tests/`, and all `.env*` |
+| `.env.example` (root) | Optional host-port / model overrides. No credentials |
+| Liveness endpoint | `GET /health` on both services |
+| Readiness endpoint | `GET /ready` on both services (configuration-only — see 4.3) |
 | Backend CI (`.github/workflows/backend.yml`) | Lint, unit, E2E, build on Node 22 |
-| Manual backend startup | `npm run start:dev` / `npm run start:prod` |
-| Manual AI Engine startup | `uvicorn app.main:app` |
-| Liveness endpoint | `GET /health` |
-| Readiness endpoint | `GET /ready` |
 
-CI covers **only** `apps/api`. The AI Engine and the extension are not gated by
-any workflow, on any branch.
+The AI Engine source is owned by Member 3 and was imported from
+`origin/feature/member3-ai` at `1c73b34`, including its own `Dockerfile`. That
+file was not authored here.
 
 ---
 
-## 3. Backend startup
+## 3. Container topology
 
-### 3.1 Development
-
-```bash
-cd apps/api
-npm ci
-npm run start:dev
+```
+host
+├── Ollama            :11434   host process, NOT containerised
+│        ▲
+│        │ host.docker.internal (mapped via extra_hosts)
+│        │
+└── Docker Compose network
+    ├── ai-engine      :8000    FastAPI, non-root appuser
+    │        ▲
+    │        │ service name "ai-engine"
+    │        │
+    └── api            :3000    NestJS, non-root node
+             ▲
+             └── published to the host for local clients
 ```
 
-Binds `PORT`, default `3000`.
+`api` never contacts Ollama. It only proxies to `ai-engine`.
 
-### 3.2 Production-style
-
-```bash
-cd apps/api
-npm ci
-npm run build
-npm run start:prod        # node dist/main
-```
-
-### 3.3 Required environment
-
-```bash
-export PORT=3000
-export AI_ENGINE_BASE_URL=http://127.0.0.1:8000
-export AI_ENGINE_TIMEOUT_MS=60000
-```
-
-| Variable | Default | Notes |
-|---|---|---|
-| `PORT` | `3000` | |
-| `AI_ENGINE_BASE_URL` | `http://127.0.0.1:8000` | Bare origin, no trailing slash |
-| `AI_ENGINE_TIMEOUT_MS` | `60000` | Must exceed real inference time (~34s measured) |
-
-Full reference: [environment.md](../development/environment.md).
-
-### 3.4 Health checking
-
-| Probe | Endpoint | Success |
-|---|---|---|
-| Liveness | `GET /health` | `200 {"status":"ok"}` — no dependencies |
-| Readiness | `GET /ready` | `200 {"status":"ready","aiEngine":"ok"}` |
-
-Configure a liveness probe against `/health` and a readiness probe against
-`/ready`. Liveness must never depend on the AI Engine, or a downstream outage
-would cause a restart loop of a healthy process.
+There is no Compose service for Ollama and none for the extension.
 
 ---
 
-## 4. AI Engine startup
+## 4. Running the stack
 
-Not present in this checkout; developed on `feature/member3-ai`.
+**Requires Docker Desktop** with the daemon running. Ollama runs on the host.
+
+### 4.1 Start
 
 ```bash
-cd apps/ai-engine
-pip install -r requirements.txt
-export PROVIDER=ollama
-export MODEL=llama3
-export PROVIDER_BASE_URL=http://localhost:11434
-export REQUEST_TIMEOUT=60
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+ollama serve            # if not already running
+ollama list             # must list llama3:latest
+
+docker compose up --build
+docker compose ps
 ```
 
-| Variable | Default |
+Shut down with `docker compose down`. Images are retained.
+
+### 4.2 Host ports
+
+Container ports are fixed by the service contract; only the host side of the
+published mapping is adjustable, so the stack does not collide with a
+development process already bound to `3000` or `8000`.
+
+| Service | Container | Default host | Override |
+|---|---|---|---|
+| `api` | `3000` | `3002` | `API_HOST_PORT` |
+| `ai-engine` | `8000` | `8002` | `AI_ENGINE_HOST_PORT` |
+
+Set them in a gitignored `.env` (`cp .env.example .env`) to claim `3000`/`8000`
+when free.
+
+### 4.3 Health checks
+
+Both Compose healthchecks target `/health`, never `/ready`.
+
+| Service | Probe | Tooling | Why |
+|---|---|---|---|
+| `api` | `GET /health` on `127.0.0.1:3000` | Node global `fetch` | `node:22-slim` has no curl/wget |
+| `ai-engine` | `GET /health` on `127.0.0.1:8000` | Python stdlib `urllib` | image has no curl/wget |
+
+`/ready` was rejected as a probe for a specific reason: the AI Engine's
+`/ready` makes **no LLM call**. It checks only that `PROVIDER` is a non-empty
+string, so it answers `200` even with Ollama stopped or the model missing. The
+backend's `/ready` proxies it and inherits the same weakness. A `/ready` probe
+would therefore mark a stack healthy while every real analysis request fails.
+
+`/health` is the honest container probe: it proves the process is up and
+performs no network I/O, so a downstream slowdown cannot cause a restart loop.
+
+**A `200` from `/ready` is not proof that Ollama is working.** The only proof is
+a real analysis request (section 5).
+
+---
+
+## 5. Verifying a real end-to-end analysis
+
+Liveness proves the process started. Only a real request proves the LLM path
+works.
+
+```bash
+curl -X POST http://localhost:3002/analysis/code \
+  -H 'Content-Type: application/json' \
+  -d '{"language":"python","code":"def add(a, b):\n    return a + b\n"}'
+```
+
+The request flows: client → `api` container → NestJS controller and service →
+`AiEngineAdapterProvider` → `ai-engine` container → host Ollama → `llama3` →
+back. A `summary` in the response body is the proof that a model answered;
+a `503` or `504` means it did not.
+
+Expect tens of seconds on CPU-only hardware — about 34 seconds was measured for
+`llama3`. Both timeouts are budgeted at 60 seconds
+(`AI_ENGINE_TIMEOUT_MS`, `REQUEST_TIMEOUT`).
+
+### Verified model: `llama3`
+
+`llama3` is the model verified end-to-end. **Do not substitute `qwen3:8b`.**
+
+> **Known limitation — `qwen3:8b` live timeout (unfixed, Member 3 owned).**
+> `qwen3:8b` is a thinking model. Its reasoning trace arrives in
+> `message.thinking`, which `OllamaProvider.complete` discards, and the provider
+> sends no generation cap, so with `stream: False` generation cannot complete
+> inside the read timeout. A real request burns the full `REQUEST_TIMEOUT` and
+> returns `504 PROVIDER_TIMEOUT`.
+>
+> The defect is in the AI Engine's provider layer, is acknowledged in
+> `apps/ai-engine/tests/integration/test_failure_states.py` and
+> `tests/integration/__init__.py`, and is **not** worked around anywhere in this
+> repository. It is a provider defect, not a Compose, networking, or Dockerfile
+> fault. No timeout was silently increased to hide it.
+
+---
+
+## 6. AI Engine configuration in Compose
+
+`compose.yaml` sets these; see `.env.example` for the overridable subset.
+
+| Variable | Value in Compose | Notes |
+|---|---|---|
+| `PROVIDER` | `ollama` | only implemented provider |
+| `MODEL` | `llama3` | overridable via `AI_ENGINE_MODEL` |
+| `PROVIDER_BASE_URL` | `http://host.docker.internal:11434` | **not** `localhost` — see below |
+| `REQUEST_TIMEOUT` | `60` | overridable via `AI_ENGINE_REQUEST_TIMEOUT` |
+| `PROVIDER_API_KEY` | *unset* | Ollama needs no key; never set it |
+| `HOST` / `PORT` | *not set* | the image `CMD` hardcodes `--host 0.0.0.0 --port 8000`, so these are inert |
+
+`host.docker.internal` is mapped explicitly via
+`extra_hosts: ["host.docker.internal:host-gateway"]`. Docker Desktop provides
+the name implicitly; the explicit mapping is what lets the same file work on
+Docker Engine for Linux. Using `localhost:11434` inside the container points at
+the container itself, and every analysis fails with `503 PROVIDER_UNAVAILABLE`.
+
+The backend's `AI_ENGINE_BASE_URL` is `http://ai-engine:8000` — the Compose
+service name, never `localhost` and never the published host port.
+
+---
+
+## 7. Container security posture
+
+| Check | Result |
 |---|---|
-| `HOST` | `0.0.0.0` |
-| `PORT` | `8000` |
-| `PROVIDER` | `ollama` |
-| `MODEL` | `llama3` |
-| `PROVIDER_BASE_URL` | `http://localhost:11434` |
-| `REQUEST_TIMEOUT` | `60` |
-| `PROVIDER_API_KEY` | unset — cloud providers only |
+| Runtime user, `api` | `node` (UID 1000), stock non-root image user |
+| Runtime user, `ai-engine` | `appuser` (UID 10001), created in the Dockerfile |
+| `--privileged` | Not used |
+| Build secrets in layers | None. `npm ci` with no token; no `ARG`/`ENV` secrets |
+| `.env` / `.env.example` in build context | Excluded by both `.dockerignore` files |
+| Test code in runtime images | Excluded (`tests/`, `test/`) |
+| TLS verification | Untouched; nothing disabled |
+| Insecure registry config | None |
+| Exposed ports | `api` → host `3002`, `ai-engine` → host `8002`; both bound on all interfaces by Docker's default, so treat them as local-only |
+| Secrets in `compose.yaml` | None; all values are literals or gitignored `.env` substitutions |
 
-> **Blocker for containerisation:** the AI Engine does not load `.env` files.
-> `python-dotenv` is missing and `config.py` never calls `load_dotenv()`, so
-> the documented `cp .env.example .env` step does nothing. Variables must be
-> injected by the process environment. This must be fixed before a container
-> image can be built with a sane config story.
-
----
-
-## 5. Provider requirements
-
-The backend is a proxy to an LLM. Something must be serving models.
-
-### 5.1 Ollama (verified)
-
-```bash
-ollama serve
-ollama pull llama3
-```
-
-- Default port `11434`
-- `llama3` is the model verified end-to-end
-- Expect tens of seconds per analysis on CPU-only hardware
-- **A 34.3-second response was measured.** Any client or proxy timeout below
-  that will fail
-
-### 5.2 Cloud providers
-
-The AI Engine's provider layer is abstract, but only Ollama has been exercised.
-`PROVIDER_API_KEY` would be required. No cloud configuration has been validated.
+Both images are single-user and run without elevated privileges. Both are bound
+to `0.0.0.0` on the host by Docker's default publish behaviour, which on a
+laptop means the local network. Add a firewall rule before using this on a
+shared network.
 
 ---
 
-## 6. Runtime topology today
-
-```
-Developer machine / server
-├── Ollama            :11434   (external process)
-├── AI Engine         :8000    (uvicorn, manual)
-└── NestJS backend    :3000    (node, manual)
-```
-
-All three are on one host in every configuration that has been verified. Nothing
-has been tested split across hosts, which means nothing is known about TLS,
-firewalling, or inter-host latency.
-
----
-
-## 7. Security posture in a deployed context
+## 8. Security posture in a deployed context
 
 Before exposing any of this beyond a developer machine, note the current gaps.
 These are **limitations, not features**:
@@ -176,32 +221,31 @@ These are **limitations, not features**:
 - **No security headers.** `helmet` is not installed.
 - **No CORS configuration.** Safe only because the intended client is an
   extension host, not a browser.
-- **No TLS.** Both services speak plain HTTP.
+- **No TLS.** Both services speak plain HTTP, including the
+  `api` → `ai-engine` hop across the Compose network.
 - **No secret management.** Environment variables only. `.env` is gitignored,
   but nothing injects secrets at runtime.
+- **No resource limits.** Neither service sets CPU or memory caps, so a runaway
+  model call can exhaust the host.
 
 The logging redaction allowlist *is* production-worthy and prevents source code,
 credentials, and upstream error text from reaching logs.
 
 ---
 
-## 8. Recommended order of work
+## 9. Recommended order of work
 
-Not implementation — just sequencing, so containerisation is not attempted
-against a moving target.
+Not implementation — just sequencing.
 
 1. **Add authentication and rate limiting.** Without them, an exposed backend is
    an open, unmetered LLM proxy. This is the highest-priority gap.
-2. **Fix the AI Engine's dotenv handling.** Required before a container image can
-   have a coherent config story.
-3. **Pin versions.** Add `.nvmrc` and a `pyproject.toml` with
+2. **Fix the AI Engine's dotenv handling.** The AI Engine still ignores `.env`;
+   Compose injects variables correctly, but the two config stories disagree.
+3. **Resolve the `qwen3:8b` provider timeout** (Member 3). It is a provider-layer
+   defect: send a generation cap and read `message.thinking`.
+4. **Pin versions.** Add `.nvmrc` and a `pyproject.toml` with
    `requires-python`. Builds are currently not reproducible.
-4. **Decide the merged repository layout.** The extension is rooted at the
-   repository root on its branch; that has to be settled before any
-   multi-service container or CI file can be written.
-5. **Add CI for the AI Engine and the extension.**
-6. **Then** write a `Dockerfile` and a compose file.
+5. **Add resource limits and a read-only filesystem** to both Compose services.
+6. **Add CI for the AI Engine** — `.github/workflows/ai-engine.yml` exists on
+   `origin/feature/member3-ai` but is not on this branch.
 7. **Then** consider deployment automation.
-
-Steps 6 and 7 depend on 1–4. Attempting them earlier would bake in assumptions
-that have not been agreed.

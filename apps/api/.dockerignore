@@ -1,0 +1,56 @@
+# Build context for this Dockerfile is apps/api, so every pattern below is
+# relative to apps/api.
+#
+# Nothing listed here is needed by `nest build` (which compiles src/ via
+# tsconfig.build.json) or by `node dist/main` at runtime. Excluding these keeps
+# build context small and, more importantly, stops a developer's local
+# node_modules or a stale local dist/ from being copied into the image, where it
+# could shadow the correct platform-specific install.
+
+# --- dependencies and build output -----------------------------------------
+# A host node_modules may contain Windows/macOS binaries and would be wrong on
+# Linux. The image installs its own inside the build.
+node_modules/
+dist/
+*.tsbuildinfo
+
+# --- test and coverage ------------------------------------------------------
+# tsconfig.build.json already excludes test/ and **/*spec.ts from compilation.
+test/
+coverage/
+.nyc_output/
+
+# --- secrets ----------------------------------------------------------------
+# Never bake credentials into an image layer. Unlike .gitignore, this excludes
+# .env.example too: a template has no business in a build context, and keeping
+# the rule unconditional removes any chance of a negation line re-admitting one.
+.env
+.env.*
+
+# --- VCS and CI -------------------------------------------------------------
+# Present at the repository root rather than in apps/api, listed defensively so
+# this file stays correct if the context is ever widened.
+.git/
+.gitignore
+.github/
+
+# --- tests, docs and editor config -----------------------------------------
+# Not referenced by the build. Kept out to reduce context size.
+.vscode/
+.vscode-test/
+jest.config.ts
+.oxlintrc.json
+.prettierrc
+README.md
+
+# --- logs and editor temp files ---------------------------------------------
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vs/
+*.pid
