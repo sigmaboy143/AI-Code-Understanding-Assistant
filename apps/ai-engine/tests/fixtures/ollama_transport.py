@@ -60,6 +60,56 @@ VALID_OLLAMA_BODY: dict = {
 }
 """A well-formed 200 body — the only scripted outcome that must succeed."""
 
+THINKING_OLLAMA_BODY: dict = {
+    "model": FIXTURE_MODEL,
+    "message": {
+        "role": "assistant",
+        "thinking": "First I note the function takes two parameters...",
+        "content": "It returns the sum.",
+    },
+    "done": True,
+    "done_reason": "stop",
+}
+"""A 200 body from a *thinking* model: ``qwen3`` splits its output in two.
+
+``message.thinking`` holds the reasoning trace and ``message.content`` holds the
+answer.  Hand-written from the shape the live server returns, not captured, so
+the fixture stays deterministic and offline.
+"""
+
+THINKING_ONLY_OLLAMA_BODY: dict = {
+    "model": FIXTURE_MODEL,
+    "message": {
+        "role": "assistant",
+        "thinking": "Still reasoning when the generation budget ran out.",
+        "content": "",
+    },
+    "done": True,
+    "done_reason": "length",
+}
+"""A 200 body where the budget was spent entirely on the reasoning trace.
+
+``content`` is present but empty, which is what a generation cap produces when
+the trace does not leave room for an answer.  The provider must return it
+unchanged so the existing output-validation fallback owns the outcome.
+"""
+
+NULL_THINKING_OLLAMA_BODY: dict = {
+    "model": FIXTURE_MODEL,
+    "message": {
+        "role": "assistant",
+        "thinking": None,
+        "content": "It returns the sum.",
+    },
+    "done": True,
+    "done_reason": "stop",
+}
+"""A 200 body carrying an explicit ``"thinking": null``.
+
+Guards against a truthiness bug: reading the trace must never turn a real answer
+into an empty one.
+"""
+
 NO_MESSAGE_BODY: dict = {"foo": "bar"}
 """HTTP 200 with JSON that has no ``message`` key at all."""
 

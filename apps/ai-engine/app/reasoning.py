@@ -42,6 +42,28 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# Generation bound
+# ---------------------------------------------------------------------------
+
+#: Upper bound on completion tokens for a code-understanding analysis.
+#:
+#: The orchestrator builds the prompt with no sampling parameters, so without a
+#: default here nothing bounds the completion.  The provider calls Ollama with
+#: ``stream: False``, which means the HTTP response body is not written until
+#: generation *ends* — so an uncapped request on a thinking model can run past
+#: the provider's read timeout and surface as a 504.  That was the live Phase 13
+#: failure: ``qwen3:8b`` emits a ``thinking`` trace plus an answer, measured at
+#: ~941 tokens for the five-analysis prompt.
+#:
+#: 1024 is chosen from that measurement: it is enough for the full analysis to
+#: complete, so a normal run returns a complete answer rather than a truncated
+#: one.  It is still a *bound* — a longer run stops at the cap and returns
+#: whatever content it produced (``done_reason='length'``) instead of timing
+#: out, so an over-long generation degrades in quality rather than failing.
+DEFAULT_MAX_TOKENS = 1024
+
+
+# ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
 
@@ -123,7 +145,12 @@ def build_reasoning_request(
         role="user",
         content=_format_user_message(request, retrieved_chunks),
     )
-    return LLMRequest(messages=[system_msg, user_msg])
+    # ``max_tokens`` is set here rather than left to the caller so that every
+    # analysis path is bounded by default; see ``DEFAULT_MAX_TOKENS``.
+    return LLMRequest(
+        messages=[system_msg, user_msg],
+        max_tokens=DEFAULT_MAX_TOKENS,
+    )
 
 
 def _format_user_message(

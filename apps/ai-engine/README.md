@@ -529,6 +529,19 @@ translation happens.
 - An optional `retrieved_chunks` parameter (list of `RetrievedChunk`) can be passed to
   inject RAG context — this is the Task 7 extension point.
 
+**Generation bound:**
+- `build_reasoning_request` sets `max_tokens` to `DEFAULT_MAX_TOKENS` (1024) so every
+  analysis path is bounded without depending on a caller. The provider forwards it to
+  Ollama as `options.num_predict`. Without a cap, a `stream: False` request waits for the
+  model to stop on its own and a thinking model can outlast the read timeout (the Phase 13
+  504). Measured against `qwen3:8b`, the full five-analysis prompt needs ~1018 tokens
+  (~112s at ~9 tok/s on CPU), so 1024 lets a normal run finish while still bounding the
+  worst case. A run that would exceed the cap stops early and returns the content it
+  produced (`done_reason: "length"`) — a shorter answer instead of a timeout.
+- Thinking models return the reasoning trace in `message.thinking` and the answer in
+  `message.content`. The provider reads only `content`; the trace is discarded, never
+  prepended to `summary`.
+
 **Actual limitations:**
 - Single-turn only; no multi-agent orchestration.
 - Free-text LLM output goes into `summary`; no structured JSON extraction.
