@@ -54,6 +54,12 @@ class OllamaProvider(LLMProvider):
         ``options`` is omitted entirely when neither is set, so the server
         default applies rather than a value invented here.
 
+        Separately, ``"think": False`` is sent for ``qwen3`` tags so the model's
+        reasoning trace is not generated.  The trace is drawn from the same
+        budget as the answer, so leaving it enabled makes the ``num_predict``
+        cap insufficient on its own; see the comment at the payload build.  No
+        other model tag is affected.
+
         Raises
         ------
         ProviderError
@@ -79,6 +85,17 @@ class OllamaProvider(LLMProvider):
             options["num_predict"] = request.max_tokens
         if options:
             payload["options"] = options
+
+        # ``qwen3`` is a reasoning model: it emits a ``thinking`` trace before the
+        # answer, and those tokens are drawn from the *same* generation budget as
+        # the answer.  Capping ``num_predict`` while leaving thinking on therefore
+        # spends most of the cap on the trace, and the five-analysis prompt can
+        # still outlast the read timeout (Phase 13).  Suppressing the trace is
+        # what makes the cap sufficient, so it is sent for the tags measured to
+        # need it and for no others — a model this was never measured against
+        # keeps whatever behaviour it already had.
+        if self._model.lower().startswith("qwen3"):
+            payload["think"] = False
 
         url = f"{self._base_url}/api/chat"
 
