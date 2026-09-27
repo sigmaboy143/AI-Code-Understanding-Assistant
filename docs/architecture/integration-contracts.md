@@ -6,16 +6,19 @@ explicitly as **not available** so they cannot be mistaken for real.
 
 Source of truth for every field below is the backend's own
 `apps/api/src/analysis/contracts/` directory and, for the AI Engine side, the
-FastAPI schemas on `feature/member3-ai` (head `3ee7824`).
+FastAPI schemas in `apps/ai-engine` (synchronised from `feature/member3-ai` at
+`04faea5`).
 
 ---
 
 # Part 1 — Frontend → NestJS
 
-The intended client is the VS Code extension on `feature/member2-vscode-frontend`.
-Its declared request shapes were checked against the backend and match. **No
-request below has been executed by the extension against a running backend**, so
-this part is contract-verified but not runtime-verified.
+The intended client is the VS Code extension on `feature/member2-vscode-frontend`
+(head `dc4941c`). Its declared request shapes were checked against the backend
+and match. Its unmodified `apiService` and analysis adapter have additionally
+been exercised **headlessly against a running backend and AI Engine** in a real
+runtime, with all 15 assertions passing. The full `vscode-test` GUI suite has
+not been run.
 
 ## 1.1 Common behaviour
 
@@ -33,9 +36,11 @@ stripped; a property the DTO does not declare is rejected with `400`. Because of
 `forbidNonWhitelisted`, clients must send exactly the declared fields and no
 others.
 
-**Timeout expectation.** A real `llama3` analysis took **34.3s**. Any client
-timeout below that will abort a request the backend is still legitimately
-processing. The backend's own budget is 60s.
+**Timeout expectation.** A real analysis takes **13.9–27.3s** depending on model
+and cache state (19.2s measured for `llama3`, 18.5s cold / 13.9s warm for
+`qwen3:8b`). Any client timeout below that risks aborting a request the backend
+is still legitimately processing. The backend's own budget is 60s, and the
+extension's client timeout is 70s so it clears that budget.
 
 ## 1.2 `POST /analysis/code`
 
@@ -293,29 +298,37 @@ backend does not reinterpret `source_code` as `syntax` or `documentation` as
 
 ## 2.6 Analyses behaviour, as observed
 
+Verified against a live request to the AI Engine at `04faea5`:
+
 | Field | Behaviour on the verified runtime |
 |---|---|
 | `summary` | Populated by the free-text parser |
 | `explanation` | `null` |
+| `error_explanation` | Present as a top-level key; **not declared** in the backend contract, so it is dropped |
 | `structure` | `null` |
-| `dependencies` | `null` on `532f035`; populated from `3ee7824` onward for Python via deterministic `ast` import parsing |
+| `dependencies` | **Populated** for Python via deterministic `ast` import parsing |
 | `improvements` | `[]` |
+| `metadata.confidence` | Present as an extra key, normally `null`; not declared in the backend contract and ignored |
 
 ### Known contract drift
 
-Two mismatches exist between the AI Engine's current head and what the backend
-consumes. Both are recorded here rather than silently reconciled.
+These mismatches exist between the AI Engine at `04faea5` and what the backend
+consumes. They are recorded here rather than silently reconciled.
 
-1. **`dependencies`** is populated by `3ee7824` but the backend's
-   `AiEngineResponseContract` declares the field and never reads it. The
-   capability is invisible through the NestJS API.
-2. **`error_explanation`** is emitted by the AI Engine's schema but is absent
-   from the backend's response contract, so it is dropped.
-
-Additionally, the AI Engine's `confidence` field is declared nullable
-(`ResponseConfidence | None`) while the adapter dereferences `.level`
-unconditionally. That is safe for every response observed so far, but an
-explicit `null` would raise an unhandled `TypeError`.
+1. **`dependencies` is populated but never read.** The AI Engine fills it
+   deterministically (e.g. `os` and `json` classified as `standard_library`),
+   and `AiEngineResponseContract` declares the field, but the adapter does not
+   map it into any NestJS response. The capability is invisible through the API.
+2. **`error_explanation` is emitted but undeclared.** It appears in the live
+   response body, yet `AiEngineResponseContract` has no such property, so it is
+   discarded.
+3. **`metadata.confidence` is an undeclared extra key.** Harmless at runtime —
+   the adapter reads only `metadata.language` — but it means the backend's
+   declared `AiEngineMetadata` is narrower than what the engine actually sends.
+4. **`confidence` is nullable upstream but dereferenced unconditionally.** The
+   AI Engine declares `ResponseConfidence | None`, while the adapter reads
+   `.level`, `.evidence`, and `.notes` directly. Safe for every response
+   observed, but an explicit `null` would raise an unhandled `TypeError`.
 
 The AI Engine contract is frozen by team agreement. These are reported for
 Member 3 to address in a published contract revision, not for unilateral
@@ -360,16 +373,38 @@ readiness does not test the thing that actually matters.
 ## 2.9 Verified end-to-end result
 
 ```
-NestJS → AiEngineAdapterProvider → FastAPI AI Engine → Ollama/llama3 → NestJS
+NestJS → AiEngineAdapterProvider → FastAPI AI Engine → Ollama → NestJS
 ```
 
 | Observation | Value |
 |---|---|
 | HTTP status | `201` |
-| Wall time | ~34.3s |
-| Correlation | Matching request IDs on both sides |
-| Confidence returned | `unknown` |
+| Wall time | 19.2s (`llama3`); 18.5s cold / 13.9s warm (`qwen3:8b`) |
+| Correlation | Consistent client-side; **not** propagated to the AI Engine — see below |
+| Confidence returned | `unknown`, no numeric score |
 | Evidence returned | `source_code` |
+| Provider | `OllamaProvider`, real HTTP `200` from `host.docker.internal:11434` |
 
-Runtime was against AI Engine commit `532f035`. The current AI Engine head is
-`3ee7824`; see 2.6 for what changed since.
+Runtime was against AI Engine `04faea5`, synchronised into `apps/ai-engine`.
+
+### Cross-hop correlation gap
+
+`AiEngineClient` sends only `Content-Type: application/json`
+(`apps/api/src/analysis/adapters/ai-engine.client.ts:92`). It does **not** forward
+`X-Request-Id`. The AI Engine's middleware at `04faea5` *would* adopt an inbound
+`X-Request-Id` if one were sent, but because none is, it mints its own.
+
+Observed for one request:
+
+| Where | Value |
+|---|---|
+| Client sent | `task9-crosshop-…` |
+| Backend response header | `task9-crosshop-…` (matches) |
+| Backend response body `requestId` | `task9-crosshop-…` (matches) |
+| Backend `ai_engine_interaction` log | `task9-crosshop-…` (matches) |
+| AI Engine `request_id` | a different generated value |
+
+The backend-facing contract is satisfied — header, body, and backend logs are all
+consistent. Only the AI Engine's own log line cannot be joined to it. This is
+recorded as a known limitation and deliberately not patched, because the
+established contract does not require it.

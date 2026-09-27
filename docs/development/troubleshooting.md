@@ -95,14 +95,14 @@ Either the backend's 60-second budget elapsed, or the AI Engine returned
 
 **Fix**
 
-Check how long the model actually takes. A real `llama3` analysis was measured
-at **34.3 seconds**, so anything close to 60s is genuinely slow rather than
-broken.
+Check how long the model actually takes. Real analyses were measured at
+**19.2 seconds** (`llama3`) and **18.5 seconds** (cold `qwen3:8b`), so anything
+close to 60s is genuinely slow rather than broken.
 
 - Confirm the model is loaded: `ollama ps`
 - If inference is this slow, a smaller model or GPU offload will help
 - Raise `AI_ENGINE_TIMEOUT_MS` if the model legitimately needs longer
-- Remember clients need an even larger budget — the extension currently uses 30s
+- Remember clients need an even larger budget — the extension uses 70s
 
 ### 1.5 Every request fails immediately
 
@@ -301,13 +301,15 @@ The backend returns `201`, but the caller reports a timeout.
 
 **Cause**
 
-Client-side timeout shorter than real inference. A real `llama3` analysis took
-**34.3 seconds**; the extension's axios client defaults to **30 000 ms**.
+Client-side timeout shorter than real inference. Real analyses were measured at
+**13.9–27.3s**; the extension's axios client defaults to **70 000 ms**, which
+clears the backend's 60s budget.
 
 **Fix**
 
-Raise the **client's** timeout above the backend's latency budget. This is a
-Member 2 change. The backend's own default is already 60s.
+Raise the **client's** timeout above the backend's latency budget. The
+extension's current default is already correct; a per-request `timeout` option
+that is set lower is the usual culprit. The backend's own default is 60s.
 
 ### 3.3 Correlation ID does not match
 
@@ -326,7 +328,28 @@ body, and the logs.
 Use only letters, digits, `.`, `_`, `~`, and `-`, up to 128 characters. CR and
 LF are rejected on purpose, to prevent header injection and log forging.
 
-### 3.4 `npm audit` reports high-severity advisories
+### 3.4 The AI Engine's log shows a different request ID than the backend's
+
+**Symptom**
+
+`ai_engine_interaction` in the backend log and `request completed` in the AI
+Engine log show unrelated IDs for the same request.
+
+**Cause**
+
+**Expected behaviour, not a bug.** `AiEngineClient` sends only
+`Content-Type: application/json`
+(`apps/api/src/analysis/adapters/ai-engine.client.ts:92`). It does not forward
+`X-Request-Id`, so the AI Engine mints its own.
+
+**Fix**
+
+None required for the API contract — a client still sees one consistent ID
+across the response header, the response body, and the backend's logs. To join
+the AI Engine's log line to a request, match on timestamp and latency, or add
+the header forward in a separate, reviewed change.
+
+### 3.5 `npm audit` reports high-severity advisories
 
 **Symptom**
 

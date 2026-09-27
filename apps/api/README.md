@@ -56,7 +56,8 @@ export AI_ENGINE_TIMEOUT_MS=60000
 
 Read once at module initialisation, so changes need a restart.
 
-**Why 60000:** a real `llama3` analysis was measured at 34.3 seconds. The
+**Why 60000:** real analyses were measured at 19.2 seconds (`llama3`) and 18.5
+seconds (cold `qwen3:8b`), with a 27.3s `llama3` run also observed. The
 previous 10-second default could not have completed against a live model. 60000
 also matches the AI Engine's own 60-second provider budget, so it is an upper
 bound on the round trip rather than an arbitrary number.
@@ -111,7 +112,8 @@ aligned with the ESM settings in `jest.config.ts`.
 
 ### AI-backed
 
-These call the AI Engine and take roughly 34 seconds with a local `llama3`.
+These call the AI Engine and take roughly 14-27 seconds with a local Ollama
+model (19.2s measured for `llama3`, 18.5s cold / 13.9s warm for `qwen3:8b`).
 
 | Method | Path | Status |
 |---|---|---|

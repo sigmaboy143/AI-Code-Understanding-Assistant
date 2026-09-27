@@ -20,12 +20,13 @@ deterministic and which need live services.
 
 Verified counts on the current branch:
 
-| Suite | Suites | Tests | Result |
+| Suite | Suites / files | Tests | Result |
 |---|---|---|---|
-| `npm test` | 19 | 455 | all pass |
-| `npm run test:e2e` | 1 | 5 | all pass |
+| `npm test` | 19 suites | 455 | all pass |
+| `npm run test:e2e` | 1 suite | 5 | all pass |
 | `npm run lint` | — | — | 0 warnings, 0 errors |
 | `npm run build` | — | — | exit 0 |
+| `python -m pytest` (AI Engine) | 29 files | 870 | all pass, 1 unrelated `anyio` deprecation warning |
 
 ---
 
@@ -119,7 +120,7 @@ scripts.
 ## 3. AI Engine tests
 
 ```bash
-cd apps/ai-engine          # checkout of feature/member3-ai
+cd apps/ai-engine
 pip install -r requirements.txt
 python -m pytest
 ```
@@ -127,8 +128,8 @@ python -m pytest
 `pytest.ini` sets `testpaths = tests` and `asyncio_mode = auto`, so bare
 `pytest` also works. The README documents `python -m pytest tests/ -q`.
 
-17 test files. **Deterministic** — a mock LLM provider is used, so no Ollama and
-no network access is required.
+29 test files, 870 tests. **Deterministic** — a mock LLM provider is used, so no
+Ollama and no network access is required.
 
 Covered: API contract and error envelope, health, orchestrator, schemas,
 evidence, context builder, retrieval, reasoning, output validation, and each
@@ -143,21 +144,25 @@ parser, not as tooling.
 
 ## 4. Extension and webview tests
 
-These are **not present on this branch**. The extension lives on
-`feature/member2-vscode-frontend`, where its `package.json` is at the repository
-root.
-
-Commands below are read from that branch's `package.json`. **They have not been
-run from this branch and are not verified here.**
+These are **not present in this checkout**. The extension lives on
+`feature/member2-vscode-frontend` (head `dc4941c`), where its `package.json` is
+at the repository root.
 
 | Purpose | Command | Notes |
 |---|---|---|
 | Extension unit | `npm run test:unit` | Mocha over compiled `out/test/unit`. Headless. Requires `npm run compile` first |
-| Extension integration | `npm test` | Runs `vscode-test`; `pretest` runs `compile && lint` |
+| Extension integration | `npm test` | Runs `vscode-test`; `pretest` runs `compile && lint`. **Not executed** — downloads and launches VS Code |
 | Webview | — | **No test script and no lint script exist.** Only `npm run build` (`tsc && vite build`) |
 
 `npm test` downloads a VS Code build and opens Electron. On Linux CI it needs
 `xvfb-run`. `test:unit` is the headless alternative and is the better CI gate.
+
+**What was actually run** against branch `dc4941c`, in an isolated worktree:
+`npm ci` (root and `webview-ui`), `npm run lint` (exit 0), `npm run compile`
+(exit 0), `npm run test:unit` (**42 passing**), and the webview `npm run build`
+(exit 0). Its unmodified HTTP client and analysis adapter were then driven
+against a live Compose backend + AI Engine + Ollama stack, with **15/15**
+assertions passing. The GUI integration suite remains unrun.
 
 ---
 
@@ -165,8 +170,9 @@ run from this branch and are not verified here.**
 
 | Gap | Detail |
 |---|---|
-| No multi-service E2E | Nothing runs extension → backend → AI Engine → Ollama in one pass |
-| No live-provider test | The AI Engine's suite never exercises a real model |
+| No automated multi-service E2E in CI | The real chain extension → backend → AI Engine → Ollama **has been run manually** and passes, but nothing asserts it on every commit |
+| Full extension GUI suite not run | `npm test` (`vscode-test`) was not executed; headless equivalents all passed |
+| No live-provider test in the AI Engine suite | `python -m pytest` never exercises a real model; live checks are manual |
 | No CI for the AI Engine | `python -m pytest` is not run in any workflow |
 | No CI for the extension | The Member 2 branch has no workflow |
 | No AI quality evaluation | No dataset, no scoring, no regression baseline for answer quality |

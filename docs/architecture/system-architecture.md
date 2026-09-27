@@ -11,25 +11,25 @@ mistaken for a finished feature.
 ```
 Developer
    ↓
-VS Code Extension / React Webview          PLANNED (separate branch)
+VS Code Extension / React Webview          IMPLEMENTED (separate branch, not merged)
    ↓  HTTP, X-Request-Id correlation
 NestJS Backend  (apps/api)                 IMPLEMENTED
    ↓
-  AnalysisService                           IMPLEMENTED
+   AnalysisService                           IMPLEMENTED
    ↓  ANALYSIS_PROVIDER injection token
-  AiEngineAdapterProvider                   IMPLEMENTED
+   AiEngineAdapterProvider                   IMPLEMENTED
    ↓
-  AiEngineClient  (native fetch)           IMPLEMENTED
+   AiEngineClient  (native fetch)           IMPLEMENTED
    ↓  HTTP POST /api/v1/code-understanding
-AI Engine  (FastAPI, port 8000)            IMPLEMENTED (separate branch)
+AI Engine  (FastAPI, port 8000)            IMPLEMENTED (apps/ai-engine, in this checkout)
    ↓
-  OrchestratorService                       IMPLEMENTED
+   OrchestratorService                       IMPLEMENTED
    ↓
-  ContextBuilder + LLM provider             IMPLEMENTED
+   ContextBuilder + LLM provider             IMPLEMENTED
    ↓
-Ollama / LLM  (port 11434)                 EXTERNAL
+Ollama / LLM  (port 11434)                 EXTERNAL (host process)
    ↓  structured CodeUnderstandingResponse
-  Structured result → NestJS AnalysisResult
+   Structured result → NestJS AnalysisResult
    ↓  HTTP
 VS Code extension renders summary,
 confidence and evidence
@@ -39,17 +39,22 @@ confidence and evidence
 
 ## 2. Layer status
 
-### 2.1 VS Code Extension / React Webview — PLANNED
+### 2.1 VS Code Extension / React Webview — IMPLEMENTED (separate branch)
 
-Not present on this branch. Developed on `feature/member2-vscode-frontend`
-(head `e9962c0`), where the extension's `package.json` sits at the **repository
+Not present in this checkout. Developed on `feature/member2-vscode-frontend`
+(head `dc4941c`), where the extension's `package.json` sits at the **repository
 root** alongside `src/` and `webview-ui/`.
 
-From inspection of that branch (not run or verified here): 11 contributed
-commands, an activity-bar webview, a React 18 + Zustand + Vite UI, and an axios
-HTTP client whose request shapes match the backend. Its `aicode.useMockData`
-setting defaults to `true`, and its 30-second axios timeout is shorter than the
-backend's measured ~34s latency.
+From inspection of that branch: 11 contributed commands, an activity-bar webview,
+a React 18 + Zustand + Vite UI, and an axios HTTP client whose request shapes
+match the backend. Its `aicode.useMockData` setting defaults to `true`, and its
+axios timeout is **70 000 ms**, deliberately larger than the backend's 60s budget
+so a slow but successful analysis is not misreported as a client-side timeout.
+
+Verified headlessly against a running backend and AI Engine: lint, `tsc`
+compile, webview build, 42 unit tests, and a live client test with 15/15
+assertions passing. The full `vscode-test` GUI suite was not executed, because
+it downloads and launches VS Code.
 
 ### 2.2 NestJS Backend — IMPLEMENTED
 
@@ -82,21 +87,26 @@ narrow: build the URL, set `Content-Type: application/json`, serialise the exact
 contract, abort on a timer, and translate transport failure into a typed
 `AiEngineClientError`.
 
-### 2.5 AI Engine — IMPLEMENTED (separate branch)
+### 2.5 AI Engine — IMPLEMENTED (in this checkout)
 
-`feature/member3-ai` (head `3ee7824`), FastAPI on port 8000. Not in this
-checkout. Its internals: a provider abstraction, a context builder, an
-orchestrator, several analysis agents, an output validator, an in-memory
-retrieval implementation, and an evidence model.
+`apps/ai-engine`, synchronised from `feature/member3-ai` at `04faea5`, FastAPI on
+port 8000. It is part of this checkout and runs alongside the backend. Its
+internals: a provider abstraction, a context builder, an orchestrator, several
+analysis agents, an output validator, an in-memory retrieval implementation, an
+evidence model, and a request-correlation logging context.
 
-Its most recent change grounds `dependencies` deterministically by parsing
-Python `import` statements with `ast`, never by reading dependency names out of
-model output.
+`dependencies` is grounded deterministically by parsing Python `import`
+statements with `ast`, never by reading dependency names out of model output.
+Its Ollama provider sends a generation cap (`num_predict`, default `1024`) and
+`think: false` for qwen3 model tags, which is what allows the thinking model
+`qwen3:8b` to complete inside the read timeout.
 
 ### 2.6 Provider / LLM — EXTERNAL
 
-Ollama on port 11434 is the verified provider. `llama3` is the verified model.
-The AI Engine's provider layer is abstracted, but only Ollama has been exercised.
+Ollama on port 11434 is the verified provider. **Two models are validated
+end-to-end:** `llama3` (default, 19.2s measured) and `qwen3:8b` (18.5s cold,
+13.9s warm). The AI Engine's provider layer is abstracted, but only Ollama has
+been exercised.
 
 ### 2.7 Symbols and relationships — PARTIAL
 
@@ -127,10 +137,18 @@ module, but **no route handlers**. The controller files are 207–261 bytes —
 class declarations and nothing else. They exist to fix the module graph shape,
 not to serve traffic.
 
-### 2.11 Containerisation and deployment — NOT IMPLEMENTED
+### 2.11 Containerisation and deployment — PARTIAL
 
-No `Dockerfile`, no `docker-compose.yml`, no deployment automation, no
-infrastructure-as-code. The only CI is `.github/workflows/backend.yml`.
+`Dockerfile` per service and a root `compose.yaml` build and run the backend and
+the AI Engine as a local, single-host, two-service stack. Both images are
+multi-stage and run as non-root users. The only CI is
+`.github/workflows/backend.yml`.
+
+What does **not** exist: Kubernetes manifests, infrastructure-as-code, a
+deployment pipeline, image registry publishing, TLS termination, or a reverse
+proxy. The stack has no authentication, no TLS, and no rate limiting, so it must
+not be exposed beyond `localhost`. See the
+[deployment guide](../deployment/deployment-guide.md).
 
 ---
 
@@ -214,9 +232,10 @@ would invent meaning the engine never asserted.
 key not on it is never read, so it cannot leak even if a caller passes it.
 
 **Timeouts reflect measurement.** `AI_ENGINE_TIMEOUT_MS` defaults to 60000
-because a real analysis was measured at 34.3s. It matches the AI Engine's own
-60s provider budget, so it is an upper bound on the round trip rather than an
-invented number.
+because real analyses were measured at 19.2s (`llama3`) and 18.5s (`qwen3:8b`
+cold) on CPU-only hardware, with a 27.3s `llama3` run also seen. It matches the
+AI Engine's own 60s provider budget, so it is an upper bound on the round trip
+rather than an invented number.
 
 ---
 
@@ -226,6 +245,11 @@ invented number.
 - No authentication, authorization, or rate limiting.
 - No WebSocket or streaming. All responses are single JSON documents.
 - No symbol extraction or relationship resolution.
-- No Docker, no deployment automation.
+- No deployment automation, registry publishing, or TLS termination. The Docker
+  Compose stack is a local development stack only.
 - No CI for the AI Engine or the extension.
-- No multi-service end-to-end test.
+- No **automated** multi-service E2E test in CI. The real chain
+  (extension client → backend → AI Engine → Ollama) has been exercised manually
+  and is reproducible, but nothing asserts it on every commit.
+- `X-Request-Id` is not forwarded to the AI Engine, so its logs cannot be joined
+  to a backend request ID. The backend-facing contract is unaffected.

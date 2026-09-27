@@ -42,8 +42,8 @@ Stated explicitly so nothing here is mistaken for existing capability:
 | Readiness endpoint | `GET /ready` on both services (configuration-only — see 4.3) |
 | Backend CI (`.github/workflows/backend.yml`) | Lint, unit, E2E, build on Node 22 |
 
-The AI Engine source is owned by Member 3 and was imported from
-`origin/feature/member3-ai` at `1c73b34`, including its own `Dockerfile`. That
+The AI Engine source is owned by Member 3 and was synchronised from
+`origin/feature/member3-ai` at `04faea5`, including its own `Dockerfile`. That
 file was not authored here.
 
 ---
@@ -141,26 +141,29 @@ The request flows: client → `api` container → NestJS controller and service 
 back. A `summary` in the response body is the proof that a model answered;
 a `503` or `504` means it did not.
 
-Expect tens of seconds on CPU-only hardware — about 34 seconds was measured for
-`llama3`. Both timeouts are budgeted at 60 seconds
-(`AI_ENGINE_TIMEOUT_MS`, `REQUEST_TIMEOUT`).
+Expect tens of seconds on CPU-only hardware — 19.2s was measured for `llama3`,
+and 18.5s / 13.9s for a cold / warm `qwen3:8b`. Both timeouts are budgeted at
+60 seconds (`AI_ENGINE_TIMEOUT_MS`, `REQUEST_TIMEOUT`).
 
-### Verified model: `llama3`
+### Verified models: `llama3` and `qwen3:8b`
 
-`llama3` is the model verified end-to-end. **Do not substitute `qwen3:8b`.**
+**Both models are validated end-to-end.** `llama3` is the Compose default.
 
-> **Known limitation — `qwen3:8b` live timeout (unfixed, Member 3 owned).**
-> `qwen3:8b` is a thinking model. Its reasoning trace arrives in
-> `message.thinking`, which `OllamaProvider.complete` discards, and the provider
-> sends no generation cap, so with `stream: False` generation cannot complete
-> inside the read timeout. A real request burns the full `REQUEST_TIMEOUT` and
-> returns `504 PROVIDER_TIMEOUT`.
->
-> The defect is in the AI Engine's provider layer, is acknowledged in
-> `apps/ai-engine/tests/integration/test_failure_states.py` and
-> `tests/integration/__init__.py`, and is **not** worked around anywhere in this
-> repository. It is a provider defect, not a Compose, networking, or Dockerfile
-> fault. No timeout was silently increased to hide it.
+Earlier AI Engine revisions could not serve `qwen3:8b` within the read timeout:
+it is a thinking model whose reasoning trace arrived in `message.thinking`, which
+the provider discarded, while no generation cap was sent, so a live request
+burned the full `REQUEST_TIMEOUT` and returned `504 PROVIDER_TIMEOUT`.
+
+The synchronised AI Engine at `04faea5` fixes this at the provider layer — it
+sends `think: false` for qwen3 model tags and always sends a generation cap
+(`num_predict`, default `1024`). No timeout was increased and no workaround was
+added to hide the earlier behaviour.
+
+To run the non-default model, use the supported override:
+
+```bash
+AI_ENGINE_MODEL=qwen3:8b docker compose up -d --force-recreate ai-engine
+```
 
 ---
 
@@ -241,11 +244,16 @@ Not implementation — just sequencing.
    an open, unmetered LLM proxy. This is the highest-priority gap.
 2. **Fix the AI Engine's dotenv handling.** The AI Engine still ignores `.env`;
    Compose injects variables correctly, but the two config stories disagree.
-3. **Resolve the `qwen3:8b` provider timeout** (Member 3). It is a provider-layer
-   defect: send a generation cap and read `message.thinking`.
-4. **Pin versions.** Add `.nvmrc` and a `pyproject.toml` with
+3. **Expose `dependencies` and `error_explanation` through the backend.** The AI
+   Engine already produces both, and the backend's adapter discards them. This is
+   a Member 3 contract revision, not a unilateral backend change.
+4. **Forward `X-Request-Id` to the AI Engine.** One header at
+   `apps/api/src/analysis/adapters/ai-engine.client.ts:92` would make the AI
+   Engine's logs joinable to a backend request. The AI Engine already adopts an
+   inbound ID if sent.
+5. **Pin versions.** Add `.nvmrc` and a `pyproject.toml` with
    `requires-python`. Builds are currently not reproducible.
-5. **Add resource limits and a read-only filesystem** to both Compose services.
-6. **Add CI for the AI Engine** — `.github/workflows/ai-engine.yml` exists on
+6. **Add resource limits and a read-only filesystem** to both Compose services.
+7. **Add CI for the AI Engine** — `.github/workflows/ai-engine.yml` exists on
    `origin/feature/member3-ai` but is not on this branch.
-7. **Then** consider deployment automation.
+8. **Then** consider deployment automation.

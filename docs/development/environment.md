@@ -83,11 +83,11 @@ All are read at module initialisation.
 
 ### On `AI_ENGINE_TIMEOUT_MS`
 
-The default is 60000, not 10000, because a real `llama3` analysis was measured
-at **34.3 seconds**. A 10s default could not have completed against a live
-model. 60000 also matches the AI Engine's own `REQUEST_TIMEOUT` budget of 60
-seconds, so the backend's limit is an honest upper bound on the round trip
-rather than an arbitrary number.
+The default is 60000, not 10000, because real analyses were measured at
+**19.2 seconds** (`llama3`) and **18.5 seconds** (cold `qwen3:8b`). A 10s
+default could not have completed against a live model. 60000 also matches the AI
+Engine's own `REQUEST_TIMEOUT` budget of 60 seconds, so the backend's limit is an
+honest upper bound on the round trip rather than an arbitrary number.
 
 An AI Engine `504` and a local timeout both surface to callers as
 `504 Gateway Timeout`, so crossing this boundary is behaviourally consistent.
@@ -110,9 +110,9 @@ export AI_ENGINE_TIMEOUT_MS=60000
 
 ## 4. AI Engine variables (`apps/ai-engine`)
 
-`apps/ai-engine` is present on this branch. It was imported from
-`origin/feature/member3-ai` at `1c73b34` and is owned by Member 3; do not edit
-it to work around a provider problem.
+`apps/ai-engine` is present in this branch. It was synchronised from
+`origin/feature/member3-ai` at `04faea5` and is owned by Member 3; do not edit it
+to work around a provider problem.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -148,25 +148,25 @@ Set `PROVIDER` to the provider name and export `PROVIDER_API_KEY` from your
 shell or a secret manager. **Never** write the key into a committed file, a
 `.env` that is tracked, or a command that lands in shell history.
 
-### Model choice: `llama3`, and the `qwen3:8b` limitation
+### Model choice: `llama3` (default) and `qwen3:8b` (also validated)
 
-`llama3` is the model verified end-to-end. Confirm it is present on the host:
+`llama3` is the default and is verified end-to-end. `qwen3:8b` is **also**
+verified end-to-end. Confirm whichever you use is present on the host:
 
 ```bash
-ollama list        # must list llama3:latest
+ollama list        # must list llama3:latest and/or qwen3:8b
 ```
 
-> **Known limitation — `qwen3:8b` live timeout (unfixed, owned by Member 3).**
-> `qwen3:8b` is a *thinking* model. Its reasoning trace arrives in
-> `message.thinking`, which `OllamaProvider.complete` discards, and the provider
-> sends no generation cap, so with `stream: False` generation cannot finish
-> inside the read timeout. A real request therefore burns the full
-> `REQUEST_TIMEOUT` and returns `504 PROVIDER_TIMEOUT`.
+> **`qwen3:8b` is a thinking model, and the provider handles it explicitly.**
+> Earlier AI Engine revisions discarded the `message.thinking` trace and sent no
+> generation cap, so a live `qwen3:8b` request could not finish inside the read
+> timeout and returned `504 PROVIDER_TIMEOUT`. The AI Engine at `04faea5` fixes
+> this in the provider layer: it sends `think: false` for qwen3 model tags and
+> always sends `num_predict` (default `1024`). Live requests complete in
+> 13.9–18.5s, well inside the 60s budget.
 >
-> This is acknowledged in `apps/ai-engine/tests/integration/test_failure_states.py`
-> and `tests/integration/__init__.py` as a provider-architecture defect that is
-> deliberately not worked around. **Use `llama3` for local validation.**
-> It is recorded here so nobody re-diagnoses it as a networking or Compose fault.
+> No timeout was increased to achieve this, and no backend workaround was added.
+> `llama3` remains the default because it is the faster, better-documented path.
 
 ---
 
@@ -217,9 +217,10 @@ here** — read from that branch's `package.json` contribution points.
 Because mock mode defaults to `true`, the extension does not contact the backend
 unless a user opts out.
 
-> The extension's axios client uses a 30-second default timeout, which is
-> **shorter** than the backend's measured ~34s. Real-mode analysis requests
-> would currently abort client-side. Raising it is Member 2's task.
+> The extension's axios client uses a **70 000 ms** default timeout, which
+> deliberately exceeds the backend's 60s AI budget so a slow but successful
+> analysis is not reported as a client-side timeout. A per-request `timeout`
+> option still overrides that default.
 
 ---
 
