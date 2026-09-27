@@ -15,10 +15,9 @@ export type PanelTab =
   | "impact"
   | "tests"
   | "debug"
-  | "docs"
   | "architecture"
   | "search"
-  | "onboarding";
+  | "conversation";
 
 // ── Code context sent to the backend ────────────────────────────────────────
 

@@ -201,8 +201,9 @@ export class AiCodeSidePanelProvider implements vscode.WebviewViewProvider {
       this._onMessage,
     );
 
-    // Register the side panel as the active messaging target
-    MessagingService.getInstance().registerPanel(panel);
+    // Register the side panel as the side-panel messaging target (does not
+    // overwrite the editor panel registration)
+    MessagingService.getInstance().registerSidePanel(panel);
   }
 }
 

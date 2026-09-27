@@ -12,7 +12,7 @@ import { TestsTab } from "./features/TestsTab";
 import { DebugTab } from "./features/DebugTab";
 import { ArchitectureTab } from "./features/ArchitectureTab";
 import { SearchTab } from "./features/SearchTab";
-import { ConversationTab } from "./features/ConversationTab";
+import { ConversationTab, ConversationInput } from "./features/ConversationTab";
 import type { PanelTab } from "./types";
 
 const TABS: Array<{ id: PanelTab; label: string; title: string }> = [
@@ -26,6 +26,7 @@ const TABS: Array<{ id: PanelTab; label: string; title: string }> = [
   { id: "debug", label: "Debug", title: "Debug / diagnose errors" },
   { id: "architecture", label: "Arch", title: "Architecture overview" },
   { id: "search", label: "Search", title: "Natural language search" },
+  { id: "conversation", label: "Chat", title: "Ask about this code" },
 ];
 
 export default function App() {
@@ -75,7 +76,7 @@ export default function App() {
       {/* Context card */}
       <CodeContextCard context={codeContext} />
 
-      {/* Tab strip — first row */}
+      {/* Tab strip */}
       <div
         style={{
           display: "flex",
@@ -103,24 +104,9 @@ export default function App() {
             {tab.label}
           </button>
         ))}
-        {/* Ask tab always visible */}
-        <button
-          onClick={() => setActiveTab("search" as PanelTab)}
-          title="Natural language search"
-          style={{
-            marginLeft: "auto",
-            padding: "5px 8px",
-            background: "none",
-            color: "var(--text-muted)",
-            fontSize: "11px",
-            borderRadius: 0,
-          }}
-        >
-          🔍
-        </button>
       </div>
 
-      {/* Tab content */}
+      {/* Tab content — fills remaining space, individual tabs scroll internally */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {activeTab === "explain" && <ExplainTab />}
         {activeTab === "why" && <WhyTab />}
@@ -132,13 +118,12 @@ export default function App() {
         {activeTab === "debug" && <DebugTab />}
         {activeTab === "architecture" && <ArchitectureTab />}
         {activeTab === "search" && <SearchTab />}
-        {activeTab === "onboarding" && <ConversationTab />}
+        {activeTab === "conversation" && <ConversationTab />}
       </div>
 
-      {/* Persistent conversation / ask-about-code footer (always visible) */}
-      <div style={{ borderTop: "2px solid var(--border)", flexShrink: 0, maxHeight: 220, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <ConversationTab />
-      </div>
+      {/* Persistent conversation footer — always visible at the bottom.
+          Typing here auto-switches to the Chat tab so the reply is visible. */}
+      {activeTab !== "conversation" && <ConversationInput />}
     </div>
   );
 }

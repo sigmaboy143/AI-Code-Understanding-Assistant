@@ -1,6 +1,87 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useAppStore } from "../store/appStore";
-import { postMessage } from "../services/vscodeApi";
+
+// ── Shared send logic ─────────────────────────────────────────────────────────
+
+async function mockSend(
+  text: string,
+  file: string | undefined,
+  addMsg: (role: "user" | "assistant", content: string) => void,
+  setLoading: (v: boolean) => void
+) {
+  addMsg("user", text);
+  setLoading(true);
+  await new Promise((r) => setTimeout(r, 900));
+  const context = file ? ` (in ${file})` : "";
+  addMsg(
+    "assistant",
+    `Regarding your question about "${text}"${context}: This is where the AI-powered contextual answer will appear, informed by the repository intelligence. The answer will include evidence, confidence levels, and navigation links.`
+  );
+  setLoading(false);
+}
+
+// ── ConversationInput — the persistent input row shown in the footer ──────────
+
+export function ConversationInput() {
+  const { codeContext, addConversationMessage, setActiveTab } = useAppStore();
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSend() {
+    const text = input.trim();
+    if (!text || loading) { return; }
+    setInput("");
+    // Switch to the conversation tab so the user sees the reply
+    setActiveTab("conversation");
+    await mockSend(text, codeContext?.file, addConversationMessage, setLoading);
+  }
+
+  return (
+    <div
+      style={{
+        padding: "6px 8px",
+        borderTop: "1px solid var(--border)",
+        display: "flex",
+        gap: 6,
+        flexShrink: 0,
+        background: "var(--surface)",
+      }}
+    >
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+        placeholder="Ask about this code…"
+        disabled={loading}
+        style={{
+          flex: 1,
+          padding: "5px 8px",
+          background: "var(--surface2)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          color: "var(--text)",
+          fontSize: "12px",
+          opacity: loading ? 0.6 : 1,
+        }}
+      />
+      <button
+        onClick={handleSend}
+        disabled={loading || !input.trim()}
+        style={{
+          padding: "5px 10px",
+          background: "var(--accent)",
+          color: "var(--accent-fg)",
+          fontSize: "14px",
+          opacity: loading || !input.trim() ? 0.5 : 1,
+        }}
+      >
+        ↑
+      </button>
+    </div>
+  );
+}
+
+// ── ConversationTab — full chat view with history (shown when Chat tab active) ─
 
 export function ConversationTab() {
   const { conversationHistory, codeContext, addConversationMessage, clearConversation } = useAppStore();
@@ -16,17 +97,7 @@ export function ConversationTab() {
     const text = input.trim();
     if (!text || loading) { return; }
     setInput("");
-    addConversationMessage("user", text);
-    setLoading(true);
-
-    // Mock reply — real implementation routes through extension → backend
-    await new Promise((r) => setTimeout(r, 900));
-    const context = codeContext ? ` (in ${codeContext.file})` : "";
-    addConversationMessage(
-      "assistant",
-      `Regarding your question about "${text}"${context}: This is where the AI-powered contextual answer will appear, informed by the repository intelligence. The answer will include evidence, confidence levels, and navigation links.`
-    );
-    setLoading(false);
+    await mockSend(text, codeContext?.file, addConversationMessage, setLoading);
   }
 
   return (
@@ -68,7 +139,7 @@ export function ConversationTab() {
       </div>
 
       {/* Input */}
-      <div style={{ padding: "8px", borderTop: "1px solid var(--border)", display: "flex", gap: 6 }}>
+      <div style={{ padding: "8px", borderTop: "1px solid var(--border)", display: "flex", gap: 6, flexShrink: 0 }}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}

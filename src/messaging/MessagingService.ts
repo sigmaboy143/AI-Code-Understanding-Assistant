@@ -9,7 +9,10 @@ import { AiCodePanel } from "../panels/AiCodePanel";
  */
 export class MessagingService {
   private static _instance: MessagingService;
-  private _panel: AiCodePanel | undefined;
+  /** Side panel (activity bar WebviewView) — registered once on activation */
+  private _sidePanel: AiCodePanel | undefined;
+  /** Editor panel (standalone WebviewPanel) — registered when openAssistant command runs */
+  private _editorPanel: AiCodePanel | undefined;
 
   static getInstance(): MessagingService {
     if (!MessagingService._instance) {
@@ -18,17 +21,24 @@ export class MessagingService {
     return MessagingService._instance;
   }
 
+  /** Register the activity-bar side-panel (WebviewView). */
+  registerSidePanel(panel: AiCodePanel) {
+    this._sidePanel = panel;
+  }
+
+  /** Register the standalone editor panel (WebviewPanel). */
   registerPanel(panel: AiCodePanel) {
-    this._panel = panel;
+    this._editorPanel = panel;
   }
 
   unregisterPanel() {
-    this._panel = undefined;
+    this._editorPanel = undefined;
   }
 
-  /** Send a message to the webview. */
+  /** Send a message to all active webview panels. */
   send(msg: ExtensionToWebviewMessage) {
-    this._panel?.postMessage(msg);
+    this._sidePanel?.postMessage(msg);
+    this._editorPanel?.postMessage(msg);
   }
 
   /** Handle infrastructure messages received FROM the webview (navigate, ready). */
