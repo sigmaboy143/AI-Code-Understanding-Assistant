@@ -16,10 +16,24 @@ import type {
 
 export type LoadingState = "idle" | "loading" | "success" | "error";
 
+/**
+ * Why a tab is showing nothing.
+ *
+ * `unavailable` is not an error state. It means the backend exposes no HTTP
+ * endpoint for the feature, so there is no result and no failure to report. It
+ * is kept separate from "error" so a missing backend capability is never
+ * presented as a broken request.
+ */
+export type TabAvailability = "available" | "unavailable";
+
 interface TabState<T> {
   status: LoadingState;
   data?: T;
   error?: string;
+  /** Set when the backend has no endpoint for this feature. */
+  unavailable?: boolean;
+  /** Human-readable explanation shown when `unavailable` is true. */
+  unavailableMessage?: string;
 }
 
 export interface AppState {
@@ -50,6 +64,7 @@ export interface AppState {
   setUseMock: (v: boolean) => void;
   setLoading: (tab: PanelTab) => void;
   setError: (tab: PanelTab, message: string) => void;
+  setUnavailable: (tab: PanelTab, message: string) => void;
   setExplanation: (data: ExplanationResponse) => void;
   setWhy: (data: WhyResponse) => void;
   setRelations: (data: RelationsResponse) => void;
@@ -98,6 +113,11 @@ export const useAppStore = create<AppState>((set) => ({
   setLoading: (tab) => set((s) => ({ ...s, [tabKey(tab)]: { status: "loading" } })),
   setError: (tab, message) =>
     set((s) => ({ ...s, [tabKey(tab)]: { status: "error", error: message } })),
+  setUnavailable: (tab, message) =>
+    set((s) => ({
+      ...s,
+      [tabKey(tab)]: { status: "idle", unavailable: true, unavailableMessage: message },
+    })),
 
   setExplanation: (data) =>
     set({ explanation: { status: "success", data } }),

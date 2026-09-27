@@ -3,11 +3,12 @@ import { useAppStore } from "../store/appStore";
 import { postMessage } from "../services/vscodeApi";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { EvidenceList } from "../components/EvidenceList";
+import { CapabilityNotice } from "../components/CapabilityNotice";
 import { LoadingSpinner, ErrorState, EmptyState } from "../components/States";
 import type { RelationNode, RelationEdge } from "../types";
 
 export function RelationsTab() {
-  const { relations, codeContext } = useAppStore();
+  const { relations, codeContext, useMock } = useAppStore();
 
   function handleRequest() {
     if (!codeContext) { return; }
@@ -25,22 +26,37 @@ export function RelationsTab() {
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {relations.status === "idle" && <EmptyState message="Select code and click Show Relationships to explore connections." />}
+        {relations.unavailable && (
+          <CapabilityNotice unavailable message={relations.unavailableMessage} />
+        )}
+
+        {relations.status === "idle" && !relations.unavailable && (
+          <EmptyState message="Select code and click Show Relationships to explore connections." />
+        )}
         {relations.status === "loading" && <LoadingSpinner message="Mapping relationships…" />}
         {relations.status === "error" && <ErrorState message={relations.error ?? "Could not map relationships."} />}
         {relations.status === "success" && relations.data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <RelationGraph nodes={relations.data.nodes} edges={relations.data.edges} />
+            <CapabilityNotice useMock={useMock && relations.data.source !== "backend"} />
+
+            {relations.data.nodes.length === 0 ? (
+              // A real 200 with an empty array is a genuine backend answer: the
+              // route exists and resolved, but found no relationships. Saying
+              // so is more useful than an empty graph that looks broken.
+              <EmptyState message="The backend resolved this file and returned no relationships. Its relationship resolver currently returns an empty result." />
+            ) : (
+              <RelationGraph nodes={relations.data.nodes} edges={relations.data.edges} />
+            )}
+
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Label text="CONFIDENCE" />
               <ConfidenceBadge level={relations.data.confidence} />
             </div>
-            {relations.data.evidence && (
-              <div>
-                <Label text="EVIDENCE" />
-                <EvidenceList evidence={relations.data.evidence} />
-              </div>
-            )}
+
+            <div>
+              <Label text="EVIDENCE" />
+              <EvidenceList evidence={relations.data.evidence} />
+            </div>
           </div>
         )}
       </div>
@@ -55,6 +71,7 @@ const TYPE_COLORS: Record<RelationNode["type"], string> = {
   api: "#ce9178",
   database: "#dcdcaa",
   service: "#9cdcfe",
+  symbol: "var(--text-muted)",
 };
 
 function RelationGraph({ nodes, edges }: { nodes: RelationNode[]; edges: RelationEdge[] }) {

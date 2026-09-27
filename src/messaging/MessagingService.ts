@@ -45,13 +45,11 @@ export class MessagingService {
   async handle(msg: WebviewToExtensionMessage) {
     switch (msg.type) {
       case "ready": {
-        const config = vscode.workspace.getConfiguration("aicode");
-        const useMock = config.get<boolean>("useMockData", true);
         const ctx = getCodeContext();
         if (ctx) {
           this.send({ type: "setContext", payload: ctx });
         }
-        this.send({ type: "useMock", payload: { value: useMock } });
+        this.broadcastMode();
         break;
       }
 
@@ -77,5 +75,27 @@ export class MessagingService {
       default:
         break;
     }
+  }
+
+  /**
+   * Tells the webview whether it is showing mock or real data.
+   *
+   * Re-broadcast on configuration change as well as on `ready`, so toggling
+   * `aicode.useMockData` updates the panel's mode badge immediately instead of
+   * leaving a stale "MOCK" marker over live backend results.
+   */
+  broadcastMode() {
+    const config = vscode.workspace.getConfiguration("aicode");
+    this.send({ type: "useMock", payload: { value: config.get<boolean>("useMockData", true) } });
+  }
+
+  /** Subscribes to configuration changes. Returns a disposable for activation. */
+  watchConfiguration(onChange: (e: vscode.ConfigurationChangeEvent) => void) {
+    return vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("aicode.useMockData")) {
+        this.broadcastMode();
+      }
+      onChange(e);
+    });
   }
 }

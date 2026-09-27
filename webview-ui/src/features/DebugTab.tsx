@@ -3,7 +3,7 @@ import { useAppStore } from "../store/appStore";
 import { postMessage } from "../services/vscodeApi";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { EvidenceList } from "../components/EvidenceList";
-import { LoadingSpinner, ErrorState, EmptyState } from "../components/States";
+import { TabGate } from "../components/TabGate";
 
 const CONFIDENCE_COLORS = {
   confirmed: "var(--success)",
@@ -12,7 +12,7 @@ const CONFIDENCE_COLORS = {
 };
 
 export function DebugTab() {
-  const { debug, codeContext } = useAppStore();
+  const { debug, codeContext, useMock } = useAppStore();
   const [errorText, setErrorText] = useState("");
 
   function handleRequest() {
@@ -47,9 +47,16 @@ export function DebugTab() {
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {debug.status === "idle" && <EmptyState message="Paste an error and click Analyze to diagnose the root cause." />}
-        {debug.status === "loading" && <LoadingSpinner message="Diagnosing error…" />}
-        {debug.status === "error" && <ErrorState message={debug.error ?? "Could not analyze error."} />}
+        <TabGate
+          status={debug.status}
+          error={debug.error}
+          unavailable={debug.unavailable}
+          unavailableMessage={debug.unavailableMessage}
+          useMock={useMock}
+          loadingMessage="Diagnosing error…"
+          errorFallback="Could not analyze error."
+          idleMessage="Paste an error and click Analyze to diagnose the root cause."
+        />
         {debug.status === "success" && debug.data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ padding: "8px 10px", background: "color-mix(in srgb, var(--error) 15%, transparent)", borderRadius: "var(--radius)", borderLeft: "3px solid var(--error)" }}>

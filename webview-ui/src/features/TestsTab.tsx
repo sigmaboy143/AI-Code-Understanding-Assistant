@@ -3,10 +3,10 @@ import { useAppStore } from "../store/appStore";
 import { postMessage } from "../services/vscodeApi";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { EvidenceList } from "../components/EvidenceList";
-import { LoadingSpinner, ErrorState, EmptyState } from "../components/States";
+import { TabGate } from "../components/TabGate";
 
 export function TestsTab() {
-  const { tests, codeContext } = useAppStore();
+  const { tests, codeContext, useMock } = useAppStore();
 
   function handleRequest() {
     if (!codeContext) { return; }
@@ -24,9 +24,16 @@ export function TestsTab() {
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {tests.status === "idle" && <EmptyState message="Find tests that cover this code." />}
-        {tests.status === "loading" && <LoadingSpinner message="Finding related tests…" />}
-        {tests.status === "error" && <ErrorState message={tests.error ?? "Could not find tests."} />}
+        <TabGate
+          status={tests.status}
+          error={tests.error}
+          unavailable={tests.unavailable}
+          unavailableMessage={tests.unavailableMessage}
+          useMock={useMock}
+          loadingMessage="Finding related tests…"
+          errorFallback="Could not find tests."
+          idleMessage="Find tests that cover this code."
+        />
         {tests.status === "success" && tests.data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <p style={{ fontSize: "13px", lineHeight: 1.6 }}>{tests.data.summary}</p>

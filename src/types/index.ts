@@ -33,6 +33,20 @@ export interface CodeContext {
 
 // ── Evidence attached to AI responses ────────────────────────────────────────
 
+/**
+ * Evidence item as the UI consumes it.
+ *
+ * `file`/`lines`/`description` are the original display-oriented fields and stay
+ * exactly as they were, because the mock service and EvidenceList already read
+ * them. The fields below them are additive and carry the backend's real
+ * evidence model through without lossy conversion: `kind` is the backend
+ * taxonomy, `sourceType` is the AI Engine's verbatim `source_type`. Neither is
+ * derivable from the other, so both are kept.
+ *
+ * `commit`/`pr`/`issue` are populated only by mock data. The backend exposes no
+ * git evidence today, so a real response will leave them undefined rather than
+ * invent them.
+ */
 export interface Evidence {
   file: string;
   lines?: [number, number];
@@ -40,10 +54,57 @@ export interface Evidence {
   pr?: string;
   issue?: string;
   description?: string;
+
+  /** Backend `Evidence.kind`, preserved verbatim. */
+  kind?: string;
+  /** AI Engine `source_type`, preserved verbatim and distinct from `kind`. */
+  sourceType?: string;
+  /** Structured location, kept alongside the display-oriented `file`/`lines`. */
+  filePath?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  /** Retrieval chunk identifier, when the evidence came from a retrieved chunk. */
+  chunkId?: string;
+  /** Backend's human-readable `detail` string. */
+  detail?: string;
 }
+
+/** Provenance of a response, so the UI never implies mock data is real. */
+export type ResultSource = "backend" | "mock";
+
+/**
+ * A backend feature the panel can display but the backend cannot currently
+ * serve. The real backend at afda26c exposes no HTTP route for these, so in real
+ * mode they resolve to a capability notice instead of a fabricated request.
+ */
+export type BackendCapability =
+  | "why"
+  | "dataflow"
+  | "history"
+  | "impact"
+  | "tests"
+  | "debug"
+  | "architecture"
+  | "search"
+  | "conversation";
 
 // ── Explanation response ─────────────────────────────────────────────────────
 
+/**
+ * The model the Explain tab renders.
+ *
+ * The original what/how/why trio is retained because the UI still has those
+ * sections, but the backend does not produce three separate fields — it
+ * returns one `summary` (and, on /explanations, an optional `detailed`). The
+ * adapter therefore populates `what` from `summary` and leaves `how`/`why`
+ * empty unless real backend text exists for them. Mock mode still fills all
+ * three, as before.
+ *
+ * The fields below the divider are the real backend payload, kept intact so
+ * nothing is lost: `requestId` for correlation, `analysedAt`/`generatedAt` for
+ * timing, the raw confidence metadata including `reasoning` and an optional
+ * numeric `score`, and the structured `symbols`/`relationships`.
+ */
 export interface ExplanationResponse {
   what: string;
   how: string;
@@ -56,6 +117,46 @@ export interface ExplanationResponse {
   confidence: ConfidenceLevel;
   evidence?: Evidence[];
   mode: ExplanationMode;
+
+  // ── Real backend payload (populated when source === "backend") ────────────
+  source?: ResultSource;
+  /** Backend correlation ID, echoed into the UI for support/debugging. */
+  requestId?: string;
+  /** Backend timestamp field. Spelled as the backend spells it. */
+  analysedAt?: string;
+  /** Present only on POST /explanations, which has a `generatedAt` field. */
+  generatedAt?: string;
+  detailed?: string;
+  confidenceMeta?: {
+    level: string;
+    score?: number;
+    model?: string;
+    reasoning?: string;
+  };
+  symbols?: UiSymbol[];
+  relationships?: UiRelationship[];
+}
+
+/** A backend `CodeSymbol` in the shape the UI displays it. */
+export interface UiSymbol {
+  id: string;
+  name: string;
+  kind: string;
+  filePath?: string;
+  startLine?: number;
+  endLine?: number;
+  signature?: string;
+  documentation?: string;
+}
+
+/** A backend `CodeRelationship` in the shape the UI displays it. */
+export interface UiRelationship {
+  id: string;
+  fromSymbolId: string;
+  toSymbolId: string;
+  kind: string;
+  filePath?: string;
+  line?: number;
 }
 
 // ── Why / History response ───────────────────────────────────────────────────
@@ -90,7 +191,13 @@ export interface PrInfo {
 export interface RelationNode {
   id: string;
   label: string;
-  type: "file" | "function" | "class" | "api" | "database" | "service";
+  /**
+   * `symbol` is the honest type for a node synthesised from a backend
+   * relationship whose target symbol could not be resolved to a known kind.
+   * Guessing `function` or `class` from a relationship alone would invent a
+   * fact the backend never stated.
+   */
+  type: "file" | "function" | "class" | "api" | "database" | "service" | "symbol";
   file?: string;
   line?: number;
 }
@@ -106,6 +213,12 @@ export interface RelationsResponse {
   edges: RelationEdge[];
   confidence: ConfidenceLevel;
   evidence?: Evidence[];
+
+  // ── Real backend payload (populated when source === "backend") ────────────
+  source?: ResultSource;
+  requestId?: string;
+  /** Raw relationships exactly as GET /relationships returned them. */
+  relationships?: UiRelationship[];
 }
 
 // ── Data-flow step ───────────────────────────────────────────────────────────
@@ -204,6 +317,12 @@ export type ExtensionToWebviewMessage =
   | { type: "setExplanationMode"; payload: { mode: ExplanationMode } }
   | { type: "loading"; payload: { tab: PanelTab } }
   | { type: "error"; payload: { tab: PanelTab; message: string } }
+  /**
+   * The backend exposes no HTTP route for this feature. Sent instead of a
+   * result or a hard error so the tab can say "not currently available" rather
+   * than implying a failed analysis.
+   */
+  | { type: "capability"; payload: { tab: PanelTab; capability: BackendCapability; message: string } }
   | { type: "explanationResult"; payload: ExplanationResponse }
   | { type: "whyResult"; payload: WhyResponse }
   | { type: "relationsResult"; payload: RelationsResponse }

@@ -1,9 +1,18 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useAppStore } from "../store/appStore";
+import { CapabilityNotice } from "../components/CapabilityNotice";
 
 // ── Shared send logic ─────────────────────────────────────────────────────────
 
-async function mockSend(
+/**
+ * Produces a placeholder reply.
+ *
+ * The `conversations` controller exists in the backend but declares no route,
+ * so there is nothing to send a question to. The reply is therefore visibly a
+ * placeholder: it must never be worded so that it could be mistaken for an
+ * answer derived from the user's code.
+ */
+async function demoSend(
   text: string,
   file: string | undefined,
   addMsg: (role: "user" | "assistant", content: string) => void,
@@ -15,7 +24,8 @@ async function mockSend(
   const context = file ? ` (in ${file})` : "";
   addMsg(
     "assistant",
-    `Regarding your question about "${text}"${context}: This is where the AI-powered contextual answer will appear, informed by the repository intelligence. The answer will include evidence, confidence levels, and navigation links.`
+    `No answer was generated. The backend exposes no conversation endpoint, so this is a ` +
+      `placeholder reply to "${text}"${context}. It contains no analysis of your code.`
   );
   setLoading(false);
 }
@@ -23,17 +33,22 @@ async function mockSend(
 // ── ConversationInput — the persistent input row shown in the footer ──────────
 
 export function ConversationInput() {
-  const { codeContext, addConversationMessage, setActiveTab } = useAppStore();
+  const { codeContext, addConversationMessage, setActiveTab, useMock } = useAppStore();
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSend() {
     const text = input.trim();
     if (!text || loading) { return; }
+    // Live mode: there is no conversation endpoint, so the only reply available
+    // is the placeholder below. Sending it would put a fake assistant turn in
+    // the transcript under a LIVE badge, so the send is refused instead and the
+    // typed text is left in the box rather than silently discarded.
+    if (!useMock) { return; }
     setInput("");
     // Switch to the conversation tab so the user sees the reply
     setActiveTab("conversation");
-    await mockSend(text, codeContext?.file, addConversationMessage, setLoading);
+    await demoSend(text, codeContext?.file, addConversationMessage, setLoading);
   }
 
   return (
@@ -51,8 +66,12 @@ export function ConversationInput() {
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-        placeholder="Ask about this code…"
-        disabled={loading}
+        placeholder={
+          useMock
+            ? "Ask about this code…"
+            : "Unavailable: the backend exposes no conversation endpoint."
+        }
+        disabled={loading || !useMock}
         style={{
           flex: 1,
           padding: "5px 8px",
@@ -61,18 +80,23 @@ export function ConversationInput() {
           borderRadius: "var(--radius)",
           color: "var(--text)",
           fontSize: "12px",
-          opacity: loading ? 0.6 : 1,
+          opacity: loading || !useMock ? 0.6 : 1,
         }}
       />
       <button
         onClick={handleSend}
-        disabled={loading || !input.trim()}
+        disabled={loading || !input.trim() || !useMock}
+        title={
+          useMock
+            ? "Sends to the built-in demo reply. No backend request is made."
+            : "Unavailable: the backend's conversations controller declares no route."
+        }
         style={{
           padding: "5px 10px",
           background: "var(--accent)",
           color: "var(--accent-fg)",
           fontSize: "14px",
-          opacity: loading || !input.trim() ? 0.5 : 1,
+          opacity: loading || !input.trim() || !useMock ? 0.5 : 1,
         }}
       >
         ↑
@@ -84,7 +108,7 @@ export function ConversationInput() {
 // ── ConversationTab — full chat view with history (shown when Chat tab active) ─
 
 export function ConversationTab() {
-  const { conversationHistory, codeContext, addConversationMessage, clearConversation } = useAppStore();
+  const { conversationHistory, codeContext, addConversationMessage, clearConversation, useMock } = useAppStore();
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -96,14 +120,25 @@ export function ConversationTab() {
   async function handleSend() {
     const text = input.trim();
     if (!text || loading) { return; }
+    // Live mode: refused rather than answered with a placeholder. See
+    // ConversationInput.handleSend for the reasoning.
+    if (!useMock) { return; }
     setInput("");
-    await mockSend(text, codeContext?.file, addConversationMessage, setLoading);
+    await demoSend(text, codeContext?.file, addConversationMessage, setLoading);
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Messages */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <CapabilityNotice
+          unavailable
+          message={
+            useMock
+              ? "The backend's conversations controller declares no route, so questions are not sent anywhere and replies are placeholders. For real analysis use the Explain tab."
+              : "Conversation is not available: the backend's conversations controller declares no route, so questions are not sent anywhere. No reply is generated. Use the Explain tab for real analysis, or set aicode.useMockData to true for the demo."
+          }
+        />
         {conversationHistory.length === 0 && (
           <div style={{ color: "var(--text-muted)", fontSize: "12px", textAlign: "center", marginTop: 24 }}>
             <p style={{ marginBottom: 6 }}>Ask anything about this code.</p>
@@ -144,7 +179,12 @@ export function ConversationTab() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-          placeholder="Ask about this code…"
+          placeholder={
+            useMock
+              ? "Ask about this code…"
+              : "Unavailable: the backend exposes no conversation endpoint."
+          }
+          disabled={!useMock}
           style={{
             flex: 1,
             padding: "6px 8px",
@@ -153,17 +193,23 @@ export function ConversationTab() {
             borderRadius: "var(--radius)",
             color: "var(--text)",
             fontSize: "12px",
+            opacity: loading || !useMock ? 0.6 : 1,
           }}
         />
         <button
           onClick={handleSend}
-          disabled={loading || !input.trim()}
+          disabled={loading || !input.trim() || !useMock}
+          title={
+            useMock
+              ? "Sends to the built-in demo reply. No backend request is made."
+              : "Unavailable: the backend's conversations controller declares no route."
+          }
           style={{
             padding: "6px 10px",
             background: "var(--accent)",
             color: "var(--accent-fg)",
             fontSize: "14px",
-            opacity: loading || !input.trim() ? 0.5 : 1,
+            opacity: loading || !input.trim() || !useMock ? 0.5 : 1,
           }}
         >
           ↑

@@ -3,7 +3,7 @@ import { useAppStore } from "../store/appStore";
 import { postMessage } from "../services/vscodeApi";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { EvidenceList } from "../components/EvidenceList";
-import { LoadingSpinner, ErrorState, EmptyState } from "../components/States";
+import { TabGate } from "../components/TabGate";
 import type { DataFlowStep } from "../types";
 
 const STEP_COLORS: Record<DataFlowStep["type"], string> = {
@@ -16,7 +16,7 @@ const STEP_COLORS: Record<DataFlowStep["type"], string> = {
 };
 
 export function DataFlowTab() {
-  const { dataflow, codeContext } = useAppStore();
+  const { dataflow, codeContext, useMock } = useAppStore();
 
   function handleRequest() {
     if (!codeContext) { return; }
@@ -34,9 +34,16 @@ export function DataFlowTab() {
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {dataflow.status === "idle" && <EmptyState message="Select code and click Trace Data Flow to visualize how data moves." />}
-        {dataflow.status === "loading" && <LoadingSpinner message="Tracing data flow…" />}
-        {dataflow.status === "error" && <ErrorState message={dataflow.error ?? "Could not trace data flow."} />}
+        <TabGate
+          status={dataflow.status}
+          error={dataflow.error}
+          unavailable={dataflow.unavailable}
+          unavailableMessage={dataflow.unavailableMessage}
+          useMock={useMock}
+          loadingMessage="Tracing data flow…"
+          errorFallback="Could not trace data flow."
+          idleMessage="Select code and click Trace Data Flow to visualize how data moves."
+        />
         {dataflow.status === "success" && dataflow.data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>

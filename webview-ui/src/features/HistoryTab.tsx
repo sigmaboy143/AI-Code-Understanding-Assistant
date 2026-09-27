@@ -3,10 +3,10 @@ import { useAppStore } from "../store/appStore";
 import { postMessage } from "../services/vscodeApi";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { EvidenceList } from "../components/EvidenceList";
-import { LoadingSpinner, ErrorState, EmptyState } from "../components/States";
+import { TabGate } from "../components/TabGate";
 
 export function HistoryTab() {
-  const { history, codeContext } = useAppStore();
+  const { history, codeContext, useMock } = useAppStore();
 
   function handleRequest() {
     if (!codeContext) { return; }
@@ -24,9 +24,16 @@ export function HistoryTab() {
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {history.status === "idle" && <EmptyState message="Show the git history and evolution of this code." />}
-        {history.status === "loading" && <LoadingSpinner message="Loading git history…" />}
-        {history.status === "error" && <ErrorState message={history.error ?? "Could not load history."} />}
+        <TabGate
+          status={history.status}
+          error={history.error}
+          unavailable={history.unavailable}
+          unavailableMessage={history.unavailableMessage}
+          useMock={useMock}
+          loadingMessage="Loading git history…"
+          errorFallback="Could not load history."
+          idleMessage="Show the git history and evolution of this code."
+        />
         {history.status === "success" && history.data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p style={{ fontSize: "13px", lineHeight: 1.6 }}>{history.data.summary}</p>

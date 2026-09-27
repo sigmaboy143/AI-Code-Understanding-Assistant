@@ -2,10 +2,10 @@ import React from "react";
 import { useAppStore } from "../store/appStore";
 import { postMessage } from "../services/vscodeApi";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
-import { LoadingSpinner, ErrorState, EmptyState } from "../components/States";
+import { TabGate } from "../components/TabGate";
 
 export function ArchitectureTab() {
-  const { architecture } = useAppStore();
+  const { architecture, useMock } = useAppStore();
 
   function handleRequest() {
     postMessage({ type: "requestArchitecture", payload: {} });
@@ -22,9 +22,16 @@ export function ArchitectureTab() {
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {architecture.status === "idle" && <EmptyState message="Generate an architecture overview of this repository." />}
-        {architecture.status === "loading" && <LoadingSpinner message="Mapping architecture…" />}
-        {architecture.status === "error" && <ErrorState message={architecture.error ?? "Could not map architecture."} />}
+        <TabGate
+          status={architecture.status}
+          error={architecture.error}
+          unavailable={architecture.unavailable}
+          unavailableMessage={architecture.unavailableMessage}
+          useMock={useMock}
+          loadingMessage="Mapping architecture…"
+          errorFallback="Could not map architecture."
+          idleMessage="Generate an architecture overview of this repository."
+        />
         {architecture.status === "success" && architecture.data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p style={{ fontSize: "13px", lineHeight: 1.6 }}>{architecture.data.description}</p>

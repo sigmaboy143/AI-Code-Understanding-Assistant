@@ -3,7 +3,7 @@ import { useAppStore } from "../store/appStore";
 import { postMessage } from "../services/vscodeApi";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { EvidenceList } from "../components/EvidenceList";
-import { LoadingSpinner, ErrorState, EmptyState } from "../components/States";
+import { TabGate } from "../components/TabGate";
 import type { ImpactNode } from "../types";
 
 const TYPE_COLORS: Record<ImpactNode["type"], string> = {
@@ -14,7 +14,7 @@ const TYPE_COLORS: Record<ImpactNode["type"], string> = {
 };
 
 export function ImpactTab() {
-  const { impact, codeContext } = useAppStore();
+  const { impact, codeContext, useMock } = useAppStore();
 
   function handleRequest() {
     if (!codeContext) { return; }
@@ -32,9 +32,16 @@ export function ImpactTab() {
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {impact.status === "idle" && <EmptyState message="Discover what would be affected if this code changed." />}
-        {impact.status === "loading" && <LoadingSpinner message="Analyzing impact…" />}
-        {impact.status === "error" && <ErrorState message={impact.error ?? "Could not analyze impact."} />}
+        <TabGate
+          status={impact.status}
+          error={impact.error}
+          unavailable={impact.unavailable}
+          unavailableMessage={impact.unavailableMessage}
+          useMock={useMock}
+          loadingMessage="Analyzing impact…"
+          errorFallback="Could not analyze impact."
+          idleMessage="Discover what would be affected if this code changed."
+        />
         {impact.status === "success" && impact.data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div

@@ -3,10 +3,10 @@ import { useAppStore } from "../store/appStore";
 import { postMessage } from "../services/vscodeApi";
 import { ConfidenceBadge } from "../components/ConfidenceBadge";
 import { EvidenceList } from "../components/EvidenceList";
-import { LoadingSpinner, ErrorState, EmptyState } from "../components/States";
+import { TabGate } from "../components/TabGate";
 
 export function WhyTab() {
-  const { why, codeContext } = useAppStore();
+  const { why, codeContext, useMock } = useAppStore();
 
   function handleRequest() {
     if (!codeContext) { return; }
@@ -31,11 +31,16 @@ export function WhyTab() {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {why.status === "idle" && (
-          <EmptyState message='Click "Why Does This Exist?" to understand the purpose and history of this code.' />
-        )}
-        {why.status === "loading" && <LoadingSpinner message="Investigating origin and purpose…" />}
-        {why.status === "error" && <ErrorState message={why.error ?? "Unable to determine why."} />}
+        <TabGate
+          status={why.status}
+          error={why.error}
+          unavailable={why.unavailable}
+          unavailableMessage={why.unavailableMessage}
+          useMock={useMock}
+          loadingMessage="Investigating origin and purpose…"
+          errorFallback="Unable to determine why."
+          idleMessage={'Click "Why Does This Exist?" to understand the purpose and history of this code.'}
+        />
         {why.status === "success" && why.data && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Section title="REASON" body={why.data.reason} />

@@ -56,9 +56,9 @@ export default function App() {
           <span style={{ fontWeight: 700, fontSize: "12px", letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--accent)" }}>
             AI Code Understanding
           </span>
-          {useMock && (
+          {useMock ? (
             <span
-              title="Using mock data — configure aicode.useMockData to switch to real backend"
+              title="Mock mode — all content is generated locally. Set aicode.useMockData to false to use the real backend."
               style={{
                 fontSize: "9px",
                 padding: "1px 5px",
@@ -68,6 +68,19 @@ export default function App() {
               }}
             >
               MOCK
+            </span>
+          ) : (
+            <span
+              title="Real backend mode — aicode.useMockData is false"
+              style={{
+                fontSize: "9px",
+                padding: "1px 5px",
+                borderRadius: 8,
+                border: "1px solid var(--success)",
+                color: "var(--success)",
+              }}
+            >
+              LIVE
             </span>
           )}
         </div>

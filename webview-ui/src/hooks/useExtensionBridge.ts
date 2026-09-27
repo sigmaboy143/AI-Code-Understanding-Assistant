@@ -34,6 +34,9 @@ export function useExtensionBridge() {
         case "error":
           store.setError(msg.payload.tab, msg.payload.message);
           break;
+        case "capability":
+          store.setUnavailable(msg.payload.tab, msg.payload.message);
+          break;
         case "explanationResult":
           store.setExplanation(msg.payload);
           break;
