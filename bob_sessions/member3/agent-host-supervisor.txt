@@ -1,0 +1,102 @@
+[2026-09-27 12:31:38] info Agent host supervisor logging to C:\Users\yashw\.bobide-server\cli\agent-host-stable.log
+[2026-09-27 12:31:38] debug Resolved quality Stable to 1.126.0+bob2.2.0
+[2026-09-27 12:31:38] debug Resolved server version: 1.126.0+bob2.2.0 (commit 1.126.0+bob2.2.0)
+[2026-09-27 12:31:38] info Downloading server 1.126.0+bob2.2.0
+[2026-09-27 12:31:41] trace Downloading server: 0/136757519 (0%)
+[2026-09-27 12:32:09] trace Downloading server: 2104443/136757519 (2%)
+[2026-09-27 12:32:23] trace Downloading server: 4208886/136757519 (3%)
+[2026-09-27 12:32:33] trace Downloading server: 6307840/136757519 (5%)
+[2026-09-27 12:32:42] trace Downloading server: 8412283/136757519 (6%)
+[2026-09-27 12:32:50] trace Downloading server: 10516726/136757519 (8%)
+[2026-09-27 12:33:09] trace Downloading server: 12615680/136757519 (9%)
+[2026-09-27 12:33:10] trace Downloading server: 14720123/136757519 (11%)
+[2026-09-27 12:33:11] trace Downloading server: 16824566/136757519 (12%)
+[2026-09-27 12:33:12] trace Downloading server: 18923520/136757519 (14%)
+[2026-09-27 12:33:13] trace Downloading server: 21027963/136757519 (15%)
+[2026-09-27 12:33:13] trace Downloading server: 23130604/136757519 (17%)
+[2026-09-27 12:33:14] trace Downloading server: 25229558/136757519 (18%)
+[2026-09-27 12:33:15] trace Downloading server: 27328595/136757519 (20%)
+[2026-09-27 12:33:16] trace Downloading server: 29429351/136757519 (22%)
+[2026-09-27 12:33:25] trace Downloading server: 31527084/136757519 (23%)
+[2026-09-27 12:33:30] trace Downloading server: 33629559/136757519 (25%)
+[2026-09-27 12:33:31] trace Downloading server: 35729900/136757519 (26%)
+[2026-09-27 12:33:31] trace Downloading server: 37829352/136757519 (28%)
+[2026-09-27 12:33:31] trace Downloading server: 39928306/136757519 (29%)
+[2026-09-27 12:33:33] trace Downloading server: 42027177/136757519 (31%)
+[2026-09-27 12:33:34] trace Downloading server: 44128016/136757519 (32%)
+[2026-09-27 12:33:35] trace Downloading server: 46232044/136757519 (34%)
+[2026-09-27 12:33:36] trace Downloading server: 48333298/136757519 (35%)
+[2026-09-27 12:33:37] trace Downloading server: 50432169/136757519 (37%)
+[2026-09-27 12:33:37] trace Downloading server: 52534395/136757519 (38%)
+[2026-09-27 12:33:38] trace Downloading server: 54637617/136757519 (40%)
+[2026-09-27 12:33:44] trace Downloading server: 56737875/136757519 (41%)
+[2026-09-27 12:33:44] trace Downloading server: 58842235/136757519 (43%)
+[2026-09-27 12:33:45] trace Downloading server: 60943406/136757519 (45%)
+[2026-09-27 12:33:46] trace Downloading server: 63044079/136757519 (46%)
+[2026-09-27 12:33:47] trace Downloading server: 65143365/136757519 (48%)
+[2026-09-27 12:33:47] trace Downloading server: 67244121/136757519 (49%)
+[2026-09-27 12:33:52] trace Downloading server: 69345624/136757519 (51%)
+[2026-09-27 12:33:53] trace Downloading server: 71447020/136757519 (52%)
+[2026-09-27 12:33:53] trace Downloading server: 73547859/136757519 (54%)
+[2026-09-27 12:33:55] trace Downloading server: 75647477/136757519 (55%)
+[2026-09-27 12:33:55] trace Downloading server: 77751505/136757519 (57%)
+[2026-09-27 12:33:56] trace Downloading server: 79852261/136757519 (58%)
+[2026-09-27 12:33:56] trace Downloading server: 81949745/136757519 (60%)
+[2026-09-27 12:33:57] trace Downloading server: 84050086/136757519 (61%)
+[2026-09-27 12:33:59] trace Downloading server: 86151589/136757519 (63%)
+[2026-09-27 12:34:02] trace Downloading server: 88249713/136757519 (65%)
+[2026-09-27 12:34:03] trace Downloading server: 90354156/136757519 (66%)
+[2026-09-27 12:34:04] trace Downloading server: 92455327/136757519 (68%)
+[2026-09-27 12:34:04] trace Downloading server: 94555917/136757519 (69%)
+[2026-09-27 12:34:05] trace Downloading server: 96657005/136757519 (71%)
+[2026-09-27 12:34:06] trace Downloading server: 98759231/136757519 (72%)
+[2026-09-27 12:34:06] trace Downloading server: 100859904/136757519 (74%)
+[2026-09-27 12:34:07] trace Downloading server: 102964347/136757519 (75%)
+[2026-09-27 12:34:07] trace Downloading server: 105067901/136757519 (77%)
+[2026-09-27 12:34:09] trace Downloading server: 107171431/136757519 (78%)
+[2026-09-27 12:34:10] trace Downloading server: 109272353/136757519 (80%)
+[2026-09-27 12:34:10] trace Downloading server: 111369588/136757519 (81%)
+[2026-09-27 12:34:11] trace Downloading server: 113467653/136757519 (83%)
+[2026-09-27 12:34:15] trace Downloading server: 115571349/136757519 (85%)
+[2026-09-27 12:34:16] trace Downloading server: 117675709/136757519 (86%)
+[2026-09-27 12:34:17] trace Downloading server: 119774414/136757519 (88%)
+[2026-09-27 12:34:17] trace Downloading server: 121877719/136757519 (89%)
+[2026-09-27 12:34:18] trace Downloading server: 123981747/136757519 (91%)
+[2026-09-27 12:34:20] trace Downloading server: 126085941/136757519 (92%)
+[2026-09-27 12:34:21] trace Downloading server: 128188499/136757519 (94%)
+[2026-09-27 12:34:21] trace Downloading server: 130287536/136757519 (95%)
+[2026-09-27 12:34:26] trace Downloading server: 132386739/136757519 (97%)
+[2026-09-27 12:34:26] trace Downloading server: 134491182/136757519 (98%)
+[2026-09-27 12:34:26] trace Downloading server: 136591689/136757519 (100%)
+[2026-09-27 12:34:26] trace Downloading server: 136757519/136757519 (100%)
+[2026-09-27 12:50:40] debug Listening for agent host management requests on "\\\\.\\pipe\\bobide-9ae16251-32c0-4a91-a371-07b2b3f0bd0e"
+[2026-09-27 12:50:41] debug [1.126.0 stdout]: Server bound to \\.\pipe\bobide-9e74f679-c9ae-454b-ae82-075a0f4ff433
+[2026-09-27 12:50:41] debug [1.126.0 stdout]: Extension host agent listening on \\.\pipe\bobide-9e74f679-c9ae-454b-ae82-075a0f4ff433
+[2026-09-27 12:50:41] debug [1.126.0 stdout]: 
+[2026-09-27 12:50:41] debug [1.126.0 stdout]: [18:20:41] 
+[2026-09-27 12:50:41] debug [1.126.0 stdout]: 
+[2026-09-27 12:50:41] debug [1.126.0 stdout]: 
+[2026-09-27 12:50:41] debug [1.126.0 stdout]: 
+[2026-09-27 12:50:41] debug [1.126.0 stdout]: 
+[2026-09-27 12:50:42] debug [1.126.0 stdout]: [reconnection-grace-time] No CLI argument provided, using default: 10800000ms (10800s)
+[2026-09-27 12:50:42] debug [1.126.0 stdout]: [18:20:42] [AgentHostChannel] Registered IPC channel 'agentHostProxy' (upstream: \\.\pipe\bobide-f42752b7-aa7b-4db1-8059-6271a3a83366)
+[2026-09-27 12:50:42] debug [1.126.0 stdout]: [18:20:42] Extension host agent started. (validation: true)
+[2026-09-27 12:50:42] debug [1.126.0 stdout]: [18:20:42] ServerAgentHostManager: agent host started
+[2026-09-27 12:50:42] debug [1.126.0 stdout]: [18:20:42] Started initializing default profile extensions in extensions installation folder. file:///c%3A/Users/yashw/.bobide-server/extensions
+[2026-09-27 12:50:42] debug [1.126.0 stdout]: [18:20:42] Completed initializing default profile extensions in extensions installation folder. file:///c%3A/Users/yashw/.bobide-server/extensions
+[2026-09-27 12:50:42] debug [1.126.0 stdout]: [IPC Library: Agent Host] Agent host server listening on \\.\pipe\bobide-f42752b7-aa7b-4db1-8059-6271a3a83366
+[2026-09-27 12:50:42] info [1.126.0]: Server ready
+[2026-09-27 12:50:42] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:52:00] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:54:36] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:54:57] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:55:01] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:55:04] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:55:08] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:55:15] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:55:30] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:56:08] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:56:12] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:56:21] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:56:26] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }
+[2026-09-27 12:56:30] debug Agent host WebSocket proxy ended with error: Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }

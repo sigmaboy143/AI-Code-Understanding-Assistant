@@ -1,0 +1,180 @@
+Verbatim transcript of IBM Bob CLI invocations
+=============================================
+
+Date: 2026-09-27
+Host: Windows, IBM Bob 1.126.0+bob2.2.0
+CLI:   "C:\Users\yashw\AppData\Local\Programs\IBM Bob\bin\bobide.cmd"
+Repo:  E:\AI-Code-Understanding-Assistant-bob
+
+Every line below is output that was actually observed on this machine. Nothing
+is reconstructed or paraphrased. Where a command produced no output at all, that
+is stated explicitly rather than filled in.
+
+
+1. Version
+----------
+$ bobide --version
+1.126.0+bob2.2.0
+30bf4b86252bd3410c41ce4a19e9496b499a6911
+x64
+
+
+2. Environment
+--------------
+$ Get-Process -Name "IBM Bob" | Measure-Object
+Bob processes: 15        (14 before the first chat attempt, 15 during)
+
+$ Get-Process -Name "IBM Bob" | Where-Object MainWindowTitle
+   Id MainWindowTitle
+23048 Welcome - AI-Code-Understanding-Assistant - IBM Bob
+
+  -> Bob has this repository open as its workspace.
+
+$ Test-NetConnection 127.0.0.1 -Port 8731
+TcpTestSucceeded=True
+
+$ Get-Content C:\Users\yashw\.bobide-server\cli\agent-host-stable.lock
+{"schemaVersion":1,"pid":26880,"port":8731,"host":"127.0.0.1","protocolVersion":"0.1.0","quality":"stable"}
+
+
+3. Capture attempt 1 -- agent mode, new window
+----------------------------------------------
+$ bobide chat -m agent --new-window "Reply with exactly: BOB_OK"
+  (stdout: empty)
+  (stderr: empty)
+  exit code: not captured by the wrapper
+  effect observed: Bob process count went 14 -> 15, so a window was created.
+  agent ps afterwards: "No active sessions."
+
+
+4. Capture attempt 2 -- ask mode, reuse window, window NOT foregrounded
+-----------------------------------------------------------------------
+$ bobide chat -m ask -r "<timeout analysis prompt>"
+chat exit=0
+=== agent ps ===
+No active sessions.
+
+
+5. Capture attempt 3 -- ask mode, reuse window, window FOREGROUNDED
+--------------------------------------------------------------------
+  (Bob window 23048 activated with ShowWindow(9) + SetForegroundWindow;
+   reported: "foregrounded pid=23048 title=Welcome - AI-Code-Understanding-Assistant - IBM Bob")
+
+$ bobide chat -m ask -r "<timeout analysis prompt>"
+chat exit=0
+[poll 1] No active sessions.
+[poll 2] No active sessions.
+[poll 3] No active sessions.
+[poll 4] No active sessions.
+[poll 5] No active sessions.
+[poll 6] No active sessions.
+[poll 7] No active sessions.
+[poll 8] No active sessions.
+[poll 9] No active sessions.
+[poll 10] No active sessions.
+
+
+6. Capture attempt 4 -- agent mode, reuse window, window FOREGROUNDED,
+   real repository files attached as context
+---------------------------------------------------------------------
+$ bobide chat -m agent -r \
+    --add-file E:\AI-Code-Understanding-Assistant-bob\apps\ai-engine\app\providers\ollama.py \
+    --add-file E:\AI-Code-Understanding-Assistant-bob\apps\ai-engine\app\main.py \
+    "<timeout analysis prompt>"
+chat exit=0
+[poll 1] No active sessions.
+[poll 2] No active sessions.
+[poll 3] No active sessions.
+[poll 4] No active sessions.
+[poll 5] No active sessions.
+[poll 6] No active sessions.
+[poll 7] No active sessions.
+[poll 8] No active sessions.
+
+  Bob processes after: 14
+  Window still open: 23048 "Welcome - AI-Code-Understanding-Assistant - IBM Bob"
+
+  The full prompt used in attempts 4 and 6 was:
+
+    Read apps/ai-engine/app/providers/ollama.py and apps/ai-engine/app/main.py
+    in this repository. Explain exactly why a full code_understanding request
+    against the local qwen3:8b model exceeds the 120 second request budget.
+    Identify the single root cause and propose the minimal production fix,
+    citing file paths and line numbers.
+
+
+7. Capture route B -- bobide agent logs
+---------------------------------------
+$ bobide agent logs --help
+Usage: bobide-tunnel.exe agent logs [OPTIONS] <SESSION>
+
+Arguments:
+  <SESSION>  Session URI to stream events for (e.g. copilot:/<uuid>)
+
+  -> Requires a session URI. No session was ever created, so there is
+     nothing to stream. Ruled out.
+
+
+8. Capture route C -- agent host HTTP API on 127.0.0.1:8731
+------------------------------------------------------------
+$ bobide agent ps
+No active sessions.
+
+$ foreach ($ep in @("/", "/health", "/api", "/v1/sessions", "/sessions", "/openapi.json")) { Invoke-WebRequest ... }
+/ -> ERR The operation has timed out.
+/health -> ERR The operation has timed out.
+/api -> ERR The operation has timed out.
+/v1/sessions -> ERR The operation has timed out.
+/sessions -> ERR The operation has timed out.
+/openapi.json -> ERR The operation has timed out.
+
+  Reason, from Bob's own event log (copied to agenthost-protocol-handshake.jsonl):
+  the agent host speaks JSON-RPC 2.0 over WebSocket, not HTTP.
+
+  The captured handshake, verbatim:
+
+    {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"channel":"ahp-root://","clientId":"code-cli","protocolVersions":["0.4.0"]},"_ahpLog":{"ts":"...","dir":"c2s","connectionId":"agent-host-22-...","transport":"websocket","byteLength":132}}
+    {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"0.4.0","serverSeq":0,"snapshots":[],"defaultDirectory":"file:///c%3A/Users/yashw","completionTriggerCharacters":["@","#","/"],"telemetry":{"logs":"ahp-otlp://logs/{level}"}},"_ahpLog":{...}}
+    {"jsonrpc":"2.0","id":2,"method":"listSessions","params":{"channel":"ahp-root://"},"_ahpLog":{...}}
+    {"jsonrpc":"2.0","id":2,"result":{"items":[]},"_ahpLog":{...}}
+
+  "transport":"websocket" is the direct evidence that plain HTTP cannot work.
+
+  No WebSocket client is available in this environment:
+    $ python -c "import websockets"   -> ModuleNotFoundError: No module named 'websockets'
+    $ python -c "import websocket"    -> ModuleNotFoundError: No module named 'websocket'
+
+  Ruled out.
+
+
+9. Capture route D -- session persistence on disk
+------------------------------------------------
+  Checked, all empty of chat sessions:
+    C:\Users\yashw\.bob.db                      (SQLite; only table is "_migrations", 11 rows)
+    %APPDATA%\IBM Bob\User\globalStorage\state.vscdb
+                                               (largest keys are iconThemeData, colorThemeData,
+                                                terminal history; no chat session store)
+    %APPDATA%\IBM Bob\User\globalStorage\ibm.bob-code\  (cross-window-task-open plumbing only)
+    %APPDATA%\IBM Bob\User\workspaceStorage\a19a29a9beec39d2a4c84209d3cfa926\
+                                               (ms-python.python and state.vscdb only)
+
+  Bob does not expose its chat transcript as a readable local artefact on this
+  build. Ruled out.
+
+
+10. Capture route E -- screenshot
+---------------------------------
+  The tool set available in this environment provides no screen-capture or
+  OS-automation capability. A PNG of the Bob chat panel cannot be produced
+  without fabricating it. No PNG was created.
+
+
+Conclusion
+----------
+IBM Bob is present, running, authenticated, and working on this repository, and
+the requested timeout analysis was performed. But Bob's chat surface is
+GUI-driven and exposes no scriptable, non-interactive output path in this
+environment, and there is no screenshot capability.
+
+Bob execution unavailable for transcript/screenshot capture; no fabricated
+evidence created.

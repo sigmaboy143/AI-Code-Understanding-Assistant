@@ -649,6 +649,19 @@ python -m pytest apps/ai-engine/tests -q
 
 No real LLM service or vector database is required — all tests use in-process mocks.
 
+### Performance tests
+
+`tests/performance/` measures the engine's own cost with the model socket
+stubbed, so inference time is excluded from every figure:
+
+```bash
+python -m pytest apps/ai-engine/tests/performance -q -s
+```
+
+`-s` prints each measurement as it is taken plus a summary table. The measured
+results, thresholds, findings and NOT MEASURABLE items are documented in
+[`docs/ai-performance-report.md`](./docs/ai-performance-report.md).
+
 ### Continuous integration
 
 `.github/workflows/ai-engine.yml` runs the checks above automatically. It is
