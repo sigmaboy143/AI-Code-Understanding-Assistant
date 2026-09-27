@@ -32,12 +32,16 @@ from typing import Sequence
 
 from app.context_builder import ContextBuilder
 from app.output_validation import validate_llm_response
+from app.output_validation.dependencies import build_dependency_analysis
 from app.providers.base import LLMProvider, LLMRequest, LLMResponse
 from app.reasoning import build_reasoning_request
 from app.schemas.code_understanding import (
     AnalysisMetadata,
+    AnalysisType,
     CodeUnderstandingRequest,
     CodeUnderstandingResponse,
+    DependencyAnalysis,
+    ProgrammingLanguage,
 )
 
 
@@ -149,8 +153,9 @@ class OrchestratorService:
         - Derive evidence-backed confidence (Task 9).
         - Never silently fabricate data.
 
-        Optional structured fields remain null until structured extraction
-        is implemented in the reasoning layer.
+        Dependency results are populated only when requested and directly
+        established by deterministic source or retrieved-code evidence.
+        Other optional structured fields remain null.
         """
         # Task 10: validate + normalise
         summary_text, confidence = validate_llm_response(
@@ -165,8 +170,24 @@ class OrchestratorService:
             analyses=list(request.analyses),
         )
 
+        dependencies = None
+        if AnalysisType.DEPENDENCIES in request.analyses:
+            if request.language is ProgrammingLanguage.PYTHON:
+                evidence_texts = [
+                    text
+                    for text in [request.context, *(chunk.content for chunk in included_chunks)]
+                    if text
+                ]
+                dependencies = build_dependency_analysis(
+                    request.source_code,
+                    evidence_texts,
+                )
+            else:
+                dependencies = DependencyAnalysis()
+
         return CodeUnderstandingResponse(
             summary=summary_text,
             metadata=metadata,
             confidence=confidence,
+            dependencies=dependencies,
         )
