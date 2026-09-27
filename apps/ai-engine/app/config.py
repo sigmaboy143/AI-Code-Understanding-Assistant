@@ -43,6 +43,10 @@ class Settings:
     api_key:
         API key for cloud providers (e.g. OpenAI).  ``None`` when not set.
         Never logged or serialised.
+    log_level:
+        Threshold for this service's own log records, e.g. ``"DEBUG"`` or
+        ``"INFO"`` (default: ``"INFO"``).  Consumed by ``app.observability``;
+        it does not affect the web server's own loggers.
     """
 
     host: str = field(default_factory=lambda: os.getenv("HOST", "0.0.0.0"))
@@ -58,6 +62,7 @@ class Settings:
     api_key: str | None = field(
         default_factory=lambda: os.getenv("PROVIDER_API_KEY") or None
     )
+    log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
 
     @property
     def is_configured(self) -> bool:

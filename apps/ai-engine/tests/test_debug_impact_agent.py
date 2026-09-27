@@ -23,7 +23,6 @@ from __future__ import annotations
 import pytest
 
 from app.agents.debug_impact import (
-    AffectedComponent,
     ComponentRelationship,
     DebugAgent,
     DebugContext,
@@ -35,7 +34,6 @@ from app.agents.debug_impact import (
 from app.context_builder.builder import IncludedChunk
 from app.evidence.models import ConfidenceLevel, EvidenceSourceType
 from app.providers.mock import MockProvider
-from app.schemas.code_understanding import Severity
 
 
 # ---------------------------------------------------------------------------

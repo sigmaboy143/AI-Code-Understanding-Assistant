@@ -14,13 +14,10 @@ Coverage
 
 from __future__ import annotations
 
-import pytest
-
 from app.agents.git_reasoning import (
     GitContext,
     GitReasoningAgent,
     GitReasoningResult,
-    ReasoningStep,
 )
 from app.evidence.models import ConfidenceLevel, EvidenceSourceType
 

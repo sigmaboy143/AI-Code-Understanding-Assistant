@@ -15,8 +15,6 @@ Coverage
 
 from __future__ import annotations
 
-import pytest
-
 from app.agents.architecture import (
     ArchitectureAgent,
     ArchitectureContext,

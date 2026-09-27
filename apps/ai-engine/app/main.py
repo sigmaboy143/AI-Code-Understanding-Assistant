@@ -23,6 +23,15 @@ Status code mapping:
     504  PROVIDER_TIMEOUT     — provider call timed out
     502  PROVIDER_ERROR       — provider returned an unexpected error
     500  INTERNAL_ERROR       — all other unhandled exceptions
+
+Observability
+-------------
+Every request is assigned a correlation ID, echoed in the ``X-Request-ID``
+response header, and recorded once in the access log with its status, outcome,
+and duration.  Each failure is additionally logged with the same
+``error_code`` the client receives, so engine failure, provider failure, and
+provider timeout stay distinguishable in the logs alone.  See
+``app/observability.py``; none of this alters the contract above.
 """
 
 from __future__ import annotations
@@ -35,6 +44,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.observability import install_observability, resolve_log_level
 from app.orchestrator import OrchestratorService
 from app.providers.base import ProviderError
 from app.schemas.code_understanding import (
@@ -80,6 +90,10 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Correlation IDs, the access log, and the log handler for the `app` logger
+# tree.  Installed here so importing `app.main` is all that is required.
+install_observability(app, level=resolve_log_level(settings.log_level))
+
 
 # ---------------------------------------------------------------------------
 # Exception handlers
@@ -90,7 +104,21 @@ app = FastAPI(
 async def _validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    """Override FastAPI's default 422 handler to use the stable error envelope."""
+    """Override FastAPI's default 422 handler to use the stable error envelope.
+
+    The rejected payload is deliberately not logged: it can be large, and it may
+    carry whatever the caller submitted.  Only the location and count of the
+    validation problems are recorded.
+    """
+    logger.info(
+        "Request validation failed for %s %s.",
+        request.method,
+        request.url.path,
+        extra={
+            "error_code": "VALIDATION_ERROR",
+            "validation_errors": len(exc.errors()),
+        },
+    )
     return JSONResponse(
         status_code=422,
         content=make_error("VALIDATION_ERROR", "Request validation failed."),
@@ -100,7 +128,12 @@ async def _validation_error_handler(
 @app.exception_handler(Exception)
 async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all for any exception that escapes the route handler."""
-    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    logger.exception(
+        "Unhandled exception on %s %s",
+        request.method,
+        request.url.path,
+        extra={"error_code": "INTERNAL_ERROR"},
+    )
     return JSONResponse(
         status_code=500,
         content=make_error("INTERNAL_ERROR", "An unexpected error occurred."),
@@ -172,7 +205,12 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
     try:
         provider = _build_provider()
     except Exception as exc:
-        logger.error("Failed to build provider: %s", exc)
+        logger.error(
+            "Failed to build provider '%s': %s",
+            settings.provider,
+            exc,
+            extra={"error_code": "PROVIDER_UNAVAILABLE", "provider": settings.provider},
+        )
         return JSONResponse(
             status_code=503,
             content=make_error(
@@ -188,9 +226,15 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
 
     except ProviderError as exc:
         msg = str(exc)
+        provider_name = exc.provider or settings.provider
         # Distinguish timeout from generic provider errors.
         if any(kw in msg.lower() for kw in _TIMEOUT_KEYWORDS):
-            logger.warning("Provider timeout: %s", msg)
+            logger.warning(
+                "Provider '%s' timed out: %s",
+                provider_name,
+                msg,
+                extra={"error_code": "PROVIDER_TIMEOUT", "provider": provider_name},
+            )
             return JSONResponse(
                 status_code=504,
                 content=make_error(
@@ -198,7 +242,12 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
                     "The AI provider did not respond in time. Please try again.",
                 ),
             )
-        logger.error("Provider error: %s", msg)
+        logger.error(
+            "Provider '%s' failed: %s",
+            provider_name,
+            msg,
+            extra={"error_code": "PROVIDER_ERROR", "provider": provider_name},
+        )
         return JSONResponse(
             status_code=502,
             content=make_error(
@@ -208,7 +257,11 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
         )
 
     except asyncio.TimeoutError:
-        logger.warning("asyncio timeout waiting for provider")
+        logger.warning(
+            "Timed out waiting for provider '%s'.",
+            settings.provider,
+            extra={"error_code": "PROVIDER_TIMEOUT", "provider": settings.provider},
+        )
         return JSONResponse(
             status_code=504,
             content=make_error(
@@ -218,7 +271,11 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
         )
 
     except Exception as exc:
-        logger.exception("Unexpected error during analysis: %s", exc)
+        logger.exception(
+            "Unexpected error during analysis: %s",
+            exc,
+            extra={"error_code": "INTERNAL_ERROR", "provider": settings.provider},
+        )
         return JSONResponse(
             status_code=500,
             content=make_error("INTERNAL_ERROR", "An unexpected error occurred."),

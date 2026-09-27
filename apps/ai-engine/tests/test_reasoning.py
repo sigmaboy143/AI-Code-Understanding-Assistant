@@ -15,7 +15,6 @@ from app.reasoning import (
     _ANALYSIS_INSTRUCTIONS,
     _SYSTEM_PROMPT,
     _build_analysis_instructions,
-    _format_user_message,
     build_reasoning_request,
 )
 from app.schemas.code_understanding import (

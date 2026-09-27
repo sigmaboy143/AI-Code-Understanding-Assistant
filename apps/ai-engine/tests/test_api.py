@@ -5,13 +5,11 @@ All tests use TestClient with a patched provider — no real LLM is required.
 
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch
 
 from app.main import app
 from app.providers.base import LLMProvider, LLMRequest, LLMResponse, ProviderError
-from app.schemas.code_understanding import AnalysisType
 
 client = TestClient(app)
 

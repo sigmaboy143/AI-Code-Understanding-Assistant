@@ -122,6 +122,7 @@ the variables below, not a file the application consumes.
 | `PROVIDER_BASE_URL`| `http://localhost:11434`   | Base URL for self-hosted providers (Ollama)                           |
 | `REQUEST_TIMEOUT`  | `60`                       | Seconds to wait for a provider response before raising a 504 error   |
 | `PROVIDER_API_KEY` | *(not set)*                | API key for cloud providers (OpenAI, Anthropic). Not used for Ollama |
+| `LOG_LEVEL`        | `INFO`                     | Threshold for this service's own log records                          |
 
 > **Note:** `HOST` and `PORT` are read by `app/config.py`. When you start the
 > server with `uvicorn --host ... --port ...`, those CLI flags take precedence
@@ -294,6 +295,104 @@ All non-2xx responses use the same JSON envelope:
 | `500`       | `INTERNAL_ERROR`       | Unexpected server-side failure                                     |
 
 API keys, stack traces, and internal exception messages are **never** included in error responses.
+
+---
+
+## Observability (`app/observability.py`)
+
+The service emits logs and health endpoints only. **No metrics are exported**, and
+no runtime figures are synthesised — every number in a log line is measured at the
+moment it is written.
+
+### Correlation
+
+Every HTTP request is assigned a request ID:
+
+- If the caller sends `X-Request-ID`, that value is honoured, so an upstream
+  service can join its own records to these.
+- Otherwise a fresh UUID is generated.
+
+The ID is returned in the `X-Request-ID` response header and is stamped onto
+**every** log record produced while handling the request, so lines from modules
+that have no knowledge of it still correlate. A supplied ID is used only when it
+is 1–128 characters of `A–Z a–z 0–9 . _ -`; anything else is replaced, so a
+hostile or oversized header cannot be injected into the logs or the response
+headers.
+
+This header is the only addition to the HTTP contract. Status codes, bodies, and
+the error envelope are unchanged.
+
+### Access log
+
+Exactly one line per request, on the `app.observability` logger:
+
+```
+2026-01-01 12:00:00,000 INFO     [app.observability] request_id=e799…5d8 request completed
+```
+
+| Field          | Meaning                                                        |
+|----------------|----------------------------------------------------------------|
+| `request_id`   | Correlation ID, also returned in the response header            |
+| `service`      | Always `ai-engine`                                              |
+| `method`       | HTTP method                                                     |
+| `path`         | Request path — **the query string is never logged**             |
+| `status_code`  | Response status                                                 |
+| `outcome`      | `success` (2xx/3xx), `client_error` (4xx), `server_error` (5xx) |
+| `duration_ms`  | Wall-clock time for the whole request, in milliseconds          |
+
+### Provider-call duration
+
+The provider call is timed separately, on the `app.orchestrator.service` logger:
+
+| Field                 | Meaning                                             |
+|-----------------------|-----------------------------------------------------|
+| `provider`            | Provider class name (no config or credential)        |
+| `provider_ok`         | `True` on success, `False` when the call raised      |
+| `provider_duration_ms`| Elapsed time of the call alone                       |
+
+Recording it on **both** outcomes is what separates "the upstream is slow" from
+"the pipeline around the upstream is slow" — total request time also covers
+context assembly and output validation, so a total alone cannot attribute a
+stall to the provider.
+
+### Error classification
+
+Each failure is logged with the same `error_code` the caller receives, in an
+`error_code` field, plus `provider` where one is known:
+
+| Log level | `error_code`           | HTTP |
+|-----------|------------------------|------|
+| `INFO`    | `VALIDATION_ERROR`     | 422  |
+| `ERROR`   | `PROVIDER_UNAVAILABLE` | 503  |
+| `WARNING` | `PROVIDER_TIMEOUT`     | 504  |
+| `ERROR`   | `PROVIDER_ERROR`       | 502  |
+| `ERROR`   | `INTERNAL_ERROR`       | 500  |
+
+### What is never logged
+
+No credential, no prompt, no submitted source code, no retrieved chunk, no model
+completion, and no query string. Records carry identifiers, counts, sizes,
+status codes, and durations only. `PROVIDER_API_KEY` is read by `app/config.py`
+for the configuration check and is never written anywhere.
+
+The one deliberate exception is the upstream `ProviderError` text, which is kept
+in the operator's log because it is the main diagnostic for a 502 or 504. It
+never reaches the response body. The upstream text may contain an internal
+hostname; that is an operator log, not a client response.
+
+Third-party loggers are not configured here. Only the `app` tree is given a
+handler and a level, so every other logger — including `httpx`, which logs full
+request URLs at `INFO` — stays at the `logging` default of `WARNING`. Raising
+those is a deployment decision, not this service's.
+
+### Limitations
+
+- Durations are wall-clock measurements, not a latency histogram; no percentiles
+  are computed.
+- No metrics endpoint, no tracing export, no sampling.
+- `/ready` is a **configuration** check. It deliberately makes no LLM call, so a
+  running process with a dead provider reports ready and fails on first use. That
+  is the documented trade-off enforced by `tests/integration/test_health_contract.py`.
 
 ---
 

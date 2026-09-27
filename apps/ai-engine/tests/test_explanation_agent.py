@@ -20,7 +20,6 @@ from app.agents.explanation import (
     ExplanationAgent,
     ExplanationContext,
     ExplanationResult,
-    FlowStep,
 )
 from app.context_builder.builder import IncludedChunk
 from app.evidence.models import ConfidenceLevel, EvidenceSourceType
@@ -298,7 +297,6 @@ async def test_no_invented_modules_in_result():
 
 
 def test_flow_steps_detect_function():
-    agent = _make_agent_no_provider()
     ctx = ExplanationContext(
         source_code="def compute(x):\n    return x * 2",
         language=ProgrammingLanguage.PYTHON,

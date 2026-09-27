@@ -14,13 +14,10 @@ Coverage
 
 from __future__ import annotations
 
-import pytest
-
 from app.agents.test_agent import (
     TestAgent,
     SuiteContext as TestContext,
     SuiteAnalysisResult as TestResult,
-    SuiteCaseSummary as TestSummary,
 )
 from app.evidence.models import ConfidenceLevel, EvidenceSourceType
 

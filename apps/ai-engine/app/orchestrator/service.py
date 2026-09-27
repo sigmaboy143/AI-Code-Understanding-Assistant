@@ -24,10 +24,16 @@ Design notes
   retrieval layer (Task 7) can inject RAG context without an API change.
 - All public methods are async so callers can use the same concurrency model
   regardless of whether the underlying provider is sync or async.
+- The provider call is timed and recorded so a slow or stalled upstream is
+  visible in the logs separately from the total request time.  The record
+  carries only the provider's class name and the elapsed milliseconds — never
+  the prompt or the completion.
 """
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Sequence
 
 from app.context_builder import ContextBuilder
@@ -43,6 +49,8 @@ from app.schemas.code_understanding import (
     DependencyAnalysis,
     ProgrammingLanguage,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OrchestratorService:
@@ -110,7 +118,18 @@ class OrchestratorService:
         llm_request = self._build_llm_request(request, built_context.included_chunks or None)
 
         # ── Provider call (ProviderError propagates upward) ──────────────
-        llm_response = await self._provider.complete(llm_request)
+        # Timed separately from the whole request so a slow upstream is
+        # attributable: total request time also covers context assembly and
+        # output validation, and a timeout upstream is otherwise
+        # indistinguishable from a slow pipeline.
+        provider_name = type(self._provider).__name__
+        started = time.perf_counter()
+        try:
+            llm_response = await self._provider.complete(llm_request)
+        except BaseException:
+            _log_provider_call(provider_name, started, ok=False)
+            raise
+        _log_provider_call(provider_name, started, ok=True)
 
         # ── Task 10: validate + normalise the response ───────────────────
         return self._parse_response(llm_response, request, built_context.included_chunks)
@@ -191,3 +210,27 @@ class OrchestratorService:
             confidence=confidence,
             dependencies=dependencies,
         )
+
+
+# ---------------------------------------------------------------------------
+# Provider call timing
+# ---------------------------------------------------------------------------
+
+
+def _log_provider_call(provider_name: str, started: float, *, ok: bool) -> None:
+    """Record how long the provider call took, on success and on failure alike.
+
+    Only the provider's class name, the outcome flag, and the elapsed
+    milliseconds are recorded.  The prompt and the completion are never
+    logged, because both may contain submitted source code.
+    """
+    logger.info(
+        "Provider call finished (provider=%s, ok=%s).",
+        provider_name,
+        ok,
+        extra={
+            "provider": provider_name,
+            "provider_ok": ok,
+            "provider_duration_ms": round((time.perf_counter() - started) * 1000, 3),
+        },
+    )

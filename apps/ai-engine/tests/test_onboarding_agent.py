@@ -18,13 +18,10 @@ Coverage
 
 from __future__ import annotations
 
-import pytest
-
 from app.agents.onboarding import (
     OnboardingAgent,
     OnboardingContext,
     OnboardingResult,
-    OnboardingSection,
 )
 from app.evidence.models import ConfidenceLevel, EvidenceSourceType
 

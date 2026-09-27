@@ -275,7 +275,7 @@ class GitReasoningAgent:
             evidence.append(
                 EvidenceItem(
                     source_type=EvidenceSourceType.GIT_COMMIT,
-                    description=f"Linked issue text supplied.",
+                    description="Linked issue text supplied.",
                 )
             )
 
