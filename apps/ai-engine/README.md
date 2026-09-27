@@ -15,10 +15,48 @@ capabilities (vector stores, specialised agents) can be added incrementally.
 
 ---
 
+## Documentation map
+
+| Topic | Where |
+|---|---|
+| First-time local install and configuration | [Setup](#setup) |
+| Every supported environment variable | [Provider configuration](#provider-configuration) |
+| Running the service: local, Docker, Ollama, secrets | [Deployment](#deployment) |
+| HTTP endpoints, payloads, and the error envelope | [API endpoints](#api-endpoints) |
+| Test suite, categories, fixtures, CI safety | [Testing](#testing) |
+| Symptom-driven diagnosis and fixes | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
+| Known limits of the implementation | [Current limitations and known blockers](#current-limitations-and-known-blockers) |
+
+### Status labels used in this document
+
+| Label | Meaning |
+|---|---|
+| **VERIFIED** | Confirmed against the code in this repository, or by a command that was actually run. |
+| **LIMITATION** | A deliberate gap in the current implementation. Documented so it is not mistaken for a bug in your setup. |
+| **BLOCKER** | A defect that has been diagnosed but is **not** fixed. No workaround is presented as if it were a fix. |
+| **NOT IMPLEMENTED** | Described for context only — no code exists for it. |
+
+---
+
 ## Prerequisites
 
 - Python 3.11 or later
 - `pip`
+- *(Optional)* Docker — only needed for the container workflow in [Deployment](#docker-deployment)
+- *(Optional)* A reachable Ollama server. Ollama is **not** bundled with this
+  service; see [Ollama is an external dependency](#ollama-is-an-external-dependency)
+
+Runtime and test dependencies are pinned in `apps/ai-engine/requirements.txt`:
+
+| Package | Version | Used for |
+|---|---|---|
+| `fastapi` | `0.115.5` | HTTP application and Pydantic schemas |
+| `uvicorn[standard]` | `0.32.1` | ASGI server |
+| `httpx` | `0.27.2` | Ollama calls and the test transport doubles |
+| `pytest` | `8.3.4` | Test runner |
+| `pytest-asyncio` | `0.24.0` | Async test support |
+
+The Docker image is built on `python:3.11-slim` (see `Dockerfile`).
 
 ---
 
@@ -94,15 +132,19 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ## Running the service
 
 Set the environment variables (see [Setup](#3-configure-environment-variables))
-in the same shell that starts the process, then run:
+in the same shell that starts the process, then start Uvicorn against
+`app.main:app` on port `8000`:
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The API will be available at <http://localhost:8000>.
+The API is then available at <http://localhost:8000>, and interactive OpenAPI
+documentation at <http://localhost:8000/docs>.
 
-Interactive docs (Swagger UI): <http://localhost:8000/docs>
+Full startup, port, verification, Docker, and Ollama instructions live in
+[Deployment](#deployment). When something does not come up, go straight to
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ---
 
@@ -123,31 +165,274 @@ the variables below, not a file the application consumes.
 | `REQUEST_TIMEOUT`  | `60`                       | Seconds to wait for a provider response before raising a 504 error   |
 | `PROVIDER_API_KEY` | *(not set)*                | API key for cloud providers (OpenAI, Anthropic). Not used for Ollama |
 
-> **Note:** `HOST` and `PORT` are read by `app/config.py`. When you start the
-> server with `uvicorn --host ... --port ...`, those CLI flags take precedence
-> over the variables.
+> **Note:** `HOST` and `PORT` are read by `app/config.py` into `settings`, but
+> nothing else in the application reads them back. The bind address is decided
+> by the `uvicorn` command line, so `--host` / `--port` flags are what actually
+> take effect. If you need the variables to be authoritative, interpolate them
+> yourself when starting the process.
+>
+> **VERIFIED:** the same applies to the container — the image's `CMD` passes
+> `--host 0.0.0.0 --port 8000` explicitly, so changing `HOST`/`PORT` in
+> `docker run` has no effect on the listen address.
 
-### Running with Docker
+### How configuration reaches the process
 
-The image takes its configuration from environment variables passed to the
-container. No `.env` file is copied into or read by the image.
+**VERIFIED** — configuration is supplied to the process environment, full stop:
+
+- `app/config.py` reads each value with `os.getenv` when the `Settings` object is
+  constructed at import time. There is no other source.
+- `python-dotenv` is **not** in `requirements.txt`, and nothing in `app/` calls
+  `load_dotenv` or reads a file. A `.env` file next to the application is
+  silently ignored.
+- `.env.example` is a comment-only reference listing the supported variables and
+  their defaults. Copying it to `.env` and expecting the service to pick it up
+  will not work — see
+  [TROUBLESHOOTING.md §17](TROUBLESHOOTING.md#17-env-is-ignored).
+- Because `Settings` is a module-level singleton created at import time,
+  variables must be present **before** the process starts. Exporting them in a
+  later shell has no effect on a running process.
+
+### Unsupported provider names
+
+**VERIFIED:** `_build_provider()` in `app/main.py` recognises exactly one name,
+`ollama`. Any other `PROVIDER` value raises `RuntimeError`, which the analysis
+route converts into `503 PROVIDER_UNAVAILABLE` and `/ready` reports as
+`503`. Cloud providers are referenced by `app/config.py` only for the
+"API key required" readiness check — there is no OpenAI or Anthropic client in
+this repository.
+
+---
+
+## Deployment
+
+This section covers what the AI Engine needs at runtime and how it is started:
+as a local process or as a container. For the first-time install steps see
+[Setup](#setup); for the meaning of each variable see
+[Provider configuration](#provider-configuration).
+
+### Runtime requirements
+
+| Requirement | Value | Source of truth |
+|---|---|---|
+| Python | 3.11 or later | `Dockerfile` → `FROM python:3.11-slim` |
+| Python packages | `fastapi`, `uvicorn[standard]`, `httpx` | `requirements.txt` |
+| ASGI server | Uvicorn, started against `app.main:app` | `Dockerfile` `CMD`, [Start the service](#start-the-service) |
+| HTTP port | `8000` | `Dockerfile` → `EXPOSE 8000`; `PORT` default in `app/config.py` |
+| LLM provider | A separately running Ollama server | `app/providers/ollama.py` |
+| Working directory | `apps/ai-engine` (or `/app` in the image) | `Dockerfile` → `WORKDIR /app` |
+
+**NOT IMPLEMENTED / not present:** no database, no vector store, no embedding
+service, no message queue, no cache, and no persistent state of any kind. The
+service is stateless between requests — everything it reasons over comes from
+the request body plus the single provider call.
+
+### Start the service
+
+Local process (after [Setup](#setup)):
+
+```bash
+cd apps/ai-engine
+
+# development: reload on file changes
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# production-equivalent: no reload, single process
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Windows (PowerShell), using the virtual environment's interpreter:
+
+```powershell
+cd apps\ai-engine
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+The ASGI application object is `app.main:app`. With the arguments above the
+service listens on **port 8000** and is reachable at <http://localhost:8000>.
+Interactive OpenAPI documentation is at <http://localhost:8000/docs>.
+
+> Uvicorn is a single-process server. There is no worker, reload, or process
+> manager configuration in this repository; do not add `--workers` unless the
+> stateless request/response design has been re-checked for your deployment.
+
+### Startup verification
+
+Run these two checks immediately after startup. They are ordered: liveness
+first, then readiness.
+
+**1. Liveness — the process is up**
+
+```bash
+curl -i http://localhost:8000/health
+```
+
+```json
+{"status":"ok"}
+```
+
+**2. Readiness — the service is configured enough to accept requests**
+
+```bash
+curl -i http://localhost:8000/ready
+```
+
+```json
+{"status":"ready"}
+```
+
+Windows (PowerShell):
+
+```powershell
+Invoke-RestMethod -Uri http://localhost:8000/health -Method Get
+Invoke-RestMethod -Uri http://localhost:8000/ready  -Method Get
+```
+
+**VERIFIED — what readiness does and does not prove.** `/ready` performs **no**
+provider call. It only checks that `PROVIDER` is non-empty, and that a cloud
+provider name has `PROVIDER_API_KEY` set. Consequently:
+
+- `/ready` returning `200` does **not** mean Ollama is reachable, that the model
+  is pulled, or that a real request will succeed.
+- The only real end-to-end proof that the provider path works is a
+  `POST /api/v1/code-understanding` request. See
+  [the live `qwen3:8b` timeout](#live-qwen38b-full-analysis-timeout-blocker).
+
+If `/ready` returns `503`, the body is the standard error envelope with code
+`PROVIDER_UNAVAILABLE`.
+
+### Docker deployment
+
+The image is defined by `apps/ai-engine/Dockerfile`.
+
+**Build** (run from `apps/ai-engine`, so the `requirements.txt` and `app/`
+context paths resolve):
 
 ```bash
 cd apps/ai-engine
 docker build -t ai-engine .
+```
 
+**Run — Ollama on the Docker host machine:**
+
+```bash
 docker run --rm -p 8000:8000 \
-  -e HOST=0.0.0.0 \
-  -e PORT=8000 \
   -e PROVIDER=ollama \
-  -e MODEL=llama3 \
+  -e MODEL=qwen3:8b \
   -e PROVIDER_BASE_URL=http://host.docker.internal:11434 \
   -e REQUEST_TIMEOUT=60 \
   ai-engine
 ```
 
-Add `-e PROVIDER_API_KEY=...` only for cloud providers. When Ollama runs on the
-host machine, `host.docker.internal` is used above so the container can reach it.
+**Run — Ollama as a separate service/container:**
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e PROVIDER=ollama \
+  -e MODEL=qwen3:8b \
+  -e PROVIDER_BASE_URL=http://ollama:11434 \
+  -e REQUEST_TIMEOUT=60 \
+  ai-engine
+```
+
+`PROVIDER_BASE_URL` here is the DNS name or IP of the machine/container running
+Ollama. Reachability is a network-topology question, not a code question.
+
+**Image properties — VERIFIED from the Dockerfile:**
+
+| Property | Value |
+|---|---|
+| Base image | `python:3.11-slim` |
+| Working directory | `/app` |
+| Contents | `requirements.txt` (installed) and `app/` only |
+| Runtime user | `appuser`, a **non-root** user with UID/GID `10001` |
+| File ownership | `app/` is copied with `--chown=appuser:appuser` |
+| Exposed port | `8000` |
+| Default command | `uvicorn app.main:app --host 0.0.0.0 --port 8000` (no `--reload`) |
+| Python build flags | `PYTHONUNBUFFERED=1`, `PYTHONDONTWRITEBYTECODE=1` |
+| Dependencies installed with | `pip install --no-cache-dir -r requirements.txt` |
+
+`.dockerignore` keeps `.venv/`, `__pycache__/`, `.pytest_cache/`, `*.log`,
+`.env`, `.env.*`, `tests/`, and `pytest.ini` out of the build context. As a
+result **the test suite is not present inside the image** — run tests on the
+host, not in the container.
+
+**Not provided by the repository:** there is no `docker-compose.yml`,
+`Dockerfile` for Ollama, healthcheck `HEALTHCHECK` instruction, or multi-stage
+build. `docker build` and `docker run` above are the only supported container
+workflow. No Kubernetes manifests, cloud deployment templates, GPU
+configuration, or monitoring/metrics endpoints exist — do not look for them.
+
+### Ollama is an external dependency
+
+**VERIFIED:** `OllamaProvider` posts to `{PROVIDER_BASE_URL}/api/chat` using
+`httpx`. The AI Engine neither starts, embeds, nor supervises Ollama. If no
+Ollama server answers at `PROVIDER_BASE_URL`, analysis requests fail with
+`502 PROVIDER_ERROR` (`Cannot connect to Ollama at ...` upstream) — the
+container does not wait for it and does not start it.
+
+| Deployment shape | `PROVIDER_BASE_URL` |
+|---|---|
+| AI Engine and Ollama both on the same host, both native processes | `http://localhost:11434` |
+| AI Engine in Docker, Ollama on the Docker host | `http://host.docker.internal:11434` |
+| AI Engine in Docker, Ollama in another container on a shared network | `http://<ollama-container-name>:11434` |
+| AI Engine in Docker, Ollama on a different machine | `http://<host-or-service-ip>:11434` |
+| AI Engine in Docker, Ollama also in *that same* container | `http://localhost:11434` — only correct if the Ollama process is in the container, which this image does not do |
+
+> ### ⚠ `localhost` inside a container means the container
+>
+> In a container, `localhost` / `127.0.0.1` refers to **that container's own
+> network namespace** — not the host machine, and not another container. The AI
+> Engine image contains no Ollama server, so
+> `PROVIDER_BASE_URL=http://localhost:11434` inside a container points at a
+> process that does not exist there, and every analysis request fails with
+> `502 PROVIDER_ERROR`. Use `host.docker.internal` for a host-installed Ollama
+> or the service/container name for a separate Ollama service.
+
+**Required provider/model configuration.** `MODEL` must be a tag that exists on
+the Ollama server you point at, and that server must have the weights pulled. A
+tag that is configured but not pulled returns HTTP 404 from Ollama, which the
+engine maps to `502 PROVIDER_ERROR`. Verify independently with Ollama's own API:
+
+```bash
+curl http://localhost:11434/api/tags
+curl http://localhost:11434/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen3:8b","messages":[{"role":"user","content":"hi"}],"stream":false}'
+```
+
+**BLOCKER:** even when both calls succeed, a full
+`POST /api/v1/code-understanding` against `qwen3:8b` does not currently
+complete — see [the live `qwen3:8b` timeout](#live-qwen38b-full-analysis-timeout-blocker).
+
+### Secret handling
+
+**VERIFIED — rules this repository follows:**
+
+- No credential is hard-coded in `app/`. `app/config.py` only ever reads
+  `PROVIDER_API_KEY` from the environment and never logs or serialises it.
+- `PROVIDER_API_KEY` is not required for `PROVIDER=ollama` and should be left
+  unset in that case. The only cloud-provider reference is a readiness check in
+  `app/config.py`; there is no cloud client to authenticate.
+- Error responses never echo upstream text, environment values, or stack
+  traces — `tests/integration/test_failure_states.py` and
+  `tests/integration/test_response_contract.py` assert this.
+
+**Rules for you:**
+
+- **Never hard-code a key** in a command that lands in shell history or a
+  committed script. Prefer reading it from your shell's secret store or a
+  runtime secret injection mechanism.
+- **Never commit `.env`.** The repository root `.gitignore` already excludes
+  `.env` and `.env.*` while keeping `!.env.example`, and `.dockerignore` keeps
+  `.env` out of the build context — but neither prevents you from force-adding
+  one. Only `apps/ai-engine/.env.example` (which contains no secrets) is
+  tracked.
+- Supply secrets to the process at runtime: the shell, the service manager, or
+  the container runtime. Do not add a dotenv loader to work around this — that
+  would be a configuration-behaviour change, not a deployment fix.
+- When passing a key to `docker run`, remember it is visible in `docker inspect`
+  and in the process environment. Use a runtime secret mechanism appropriate to
+  your host instead of `-e PROVIDER_API_KEY=...` in a shared shell.
 
 ---
 
@@ -634,14 +919,279 @@ response = await service.analyse(request)  # CodeUnderstandingResponse
 
 ---
 
-## Running tests
+## Testing
+
+All AI Engine tests live under `apps/ai-engine/tests/`. Collection is configured
+by `apps/ai-engine/pytest.ini` (`testpaths = tests`, `asyncio_mode = auto` — async
+test functions need no `@pytest.mark.asyncio`).
+
+**VERIFIED — the suite is offline by construction.** No test requires a running
+Ollama, a downloaded model, an outbound network connection, or any API
+credential. Every outbound LLM call is replaced by one of two doubles:
+
+- an in-process fake provider (`tests/fixtures/failing_providers.py`) that
+  implements the real `LLMProvider` interface, or
+- an `httpx.MockTransport` replaying a scripted upstream outcome
+  (`tests/fixtures/ollama_transport.py`), aimed at the reserved-for-testing
+  host `http://ollama.test:11434` (RFC 6761 — it can never resolve).
+
+Both approaches exercise production code paths: real routing, real Pydantic
+validation, real context assembly, real prompt construction, real provider error
+translation, real output validation, and real serialisation.
+
+### Run the complete suite
 
 ```bash
 cd apps/ai-engine
-python -m pytest tests/ -q
+python -m pytest tests -q
 ```
 
-No real LLM service or vector database is required — all tests use in-process mocks.
+From the repository root, the same suite runs with:
+
+```bash
+python -m pytest apps/ai-engine/tests -q
+```
+
+**VERIFIED baseline** (run from `apps/ai-engine` on this branch):
+
+```text
+782 passed, 2 warnings
+```
+
+Both warnings come from the installed FastAPI/Starlette/httpx versions, not from
+the AI Engine: a `StarletteDeprecationWarning` about using `httpx` with
+`starlette.testclient`, and an `anyio.abc.BlockingPortal` alias deprecation.
+They are unrelated to the assertions, and `pytest.ini` suppresses only
+`PytestCollectionWarning`. The exact warning text depends on which library
+versions are installed, so compare **test outcomes**, not warning text.
+
+### Run a single category
+
+All commands below are run from `apps/ai-engine`.
+
+| Goal | Command | VERIFIED result |
+|---|---|---|
+| Integration only | `python -m pytest tests/integration -q` | `175 passed, 2 warnings` |
+| Evaluation only | `python -m pytest tests/evaluation -q` | `44 passed` |
+| Unit only | `python -m pytest tests --ignore=tests/integration --ignore=tests/evaluation -q` | `563 passed, 2 warnings` |
+
+Useful flags:
+
+| Goal | Flag |
+|---|---|
+| One module | `python -m pytest tests/integration/test_failure_states.py -q` |
+| One test or pattern | `python -m pytest tests/test_orchestrator.py -q -k "source_code"` |
+| Exact node id | `python -m pytest tests/integration/test_health_contract.py::test_health_returns_200_and_ok_status -q` |
+| Stop at the first failure | `-x` |
+| Show test names instead of dots | `-v` |
+| List tests without running them | `--collect-only -q` |
+| Short traceback on failure | `--tb=short` |
+
+### Test categories
+
+| Location | Category | Tests (VERIFIED) | What it covers |
+|---|---|---|---|
+| `tests/test_*.py` | **unit** | 563 | Pydantic schemas, retrieval, context builder, reasoning/prompt construction, evidence and confidence models, output validation, orchestrator, dependency grounding, and the eight agent classes in `app/agents/` |
+| `tests/integration/` | **integration** | 175 | Real component boundaries: the FastAPI app via `TestClient`, the orchestrator end-to-end, and the real `OllamaProvider` over a stubbed transport |
+| `tests/evaluation/` | **evaluation** | 44 | Output-quality invariants: grounding, confidence honesty, evidence traceability, reproducibility |
+| `tests/fixtures/` | **support** | 0 (nothing is collected) | Shared deterministic doubles and expectations |
+
+`563 + 175 + 44 = 782`. `tests/fixtures/` contains no `test_*` functions, so
+pytest collects nothing from it.
+
+**Unit tests** (`python -m pytest tests --ignore=tests/integration --ignore=tests/evaluation`),
+with per-module counts as verified on this branch:
+
+| Module | Tests | Focus |
+|---|---|---|
+| `test_api.py` | 21 | Routes, status codes, error envelope |
+| `test_architecture_agent.py` | 37 | Architecture agent |
+| `test_context_builder.py` | 40 | Context assembly, dedup, budget cap |
+| `test_debug_impact_agent.py` | 55 | Debug agent and Impact agent |
+| `test_dependency_grounding.py` | 7 | Import-grounded dependency extraction |
+| `test_documentation_agent.py` | 29 | Documentation agent |
+| `test_evidence.py` | 55 | Evidence and confidence models |
+| `test_explanation_agent.py` | 34 | Explanation agent |
+| `test_git_reasoning_agent.py` | 37 | WHY / Git Reasoning agent |
+| `test_health.py` | 1 | Liveness |
+| `test_onboarding_agent.py` | 52 | Onboarding agent |
+| `test_orchestrator.py` | 25 | Request → provider → response pipeline |
+| `test_output_validation.py` | 50 | Normalisation, truncation, fallbacks |
+| `test_reasoning.py` | 28 | Prompt construction |
+| `test_retrieval.py` | 24 | Lexical in-memory retriever |
+| `test_schemas.py` | 31 | Request/response models and constraints |
+| `test_test_agent.py` | 37 | Test agent |
+
+**Integration tests** (`tests/integration/`):
+
+| Module | Tests | Focus |
+|---|---|---|
+| `test_request_contract.py` | 15 | What the HTTP boundary accepts, and what reaches the provider prompt |
+| `test_response_contract.py` | 25 | Success envelope keys, error envelope, error-body confidentiality |
+| `test_health_contract.py` | 10 | `/health` and `/ready` as the NestJS backend sees them |
+| `test_provider_error_handling.py` | 21 | Upstream condition → `ProviderError` message, and outbound request shape |
+| `test_confidence_evidence_mapping.py` | 19 | Confidence determination and evidence attribution through the orchestrator |
+| `test_dependency_grounding_api.py` | 21 | Dependency grounding surviving JSON serialisation |
+| `test_e2e_user_scenarios.py` | 31 | Whole user journeys end to end (see below) |
+| `test_failure_states.py` | 33 | The eight documented failure states (see below) |
+
+**Evaluation tests** (`tests/evaluation/test_ai_output_quality.py`, 44 tests):
+seven named invariants — non-empty and usable answers, no fabricated repository
+facts promoted into structured output, dependency output grounded in a real
+import, `UNKNOWN` confidence when evidence is insufficient, `CONFIRMED`/
+`INFERRED` only where genuinely grounded, evidence traceable to the input that
+produced it, and structured output invariant to whatever the model happened to
+say. Expectations are imported from `tests/fixtures/expected_outputs.py` rather
+than written inline, so the check compares the specification against the
+implementation.
+
+### Test fixtures
+
+Location: `apps/ai-engine/tests/fixtures/` — **support code, not a test
+module.** It contains no `test_*` functions, so pytest collects nothing from
+it; both `tests/integration/` and `tests/evaluation/` import from it.
+
+| Module | Provides |
+|---|---|
+| `analysis_inputs.py` | Valid `CodeUnderstandingRequest` builders: `explanation_input`, `error_explanation_input`, `structure_input`, `dependencies_input`, `improvements_input`, plus `SIMPLE_SOURCE`, `DEPENDENCIES_SOURCE`, `ERROR_SOURCE`, `IMPROVABLE_SOURCE`, `ERROR_LOG`, `ERROR_CONTEXT` |
+| `provider_responses.py` | Deterministic response texts, including fabricated-claim texts (`GIT_FACT_CLAIM_TEXT`, `UNSUPPORTED_RELATIONSHIP_CLAIM_TEXT`, `DEPENDENCY_CLAIM_TEXT`) used as tripwires |
+| `failing_providers.py` | `static_provider`, `RecordingProvider` (captures the outbound prompt), `provider_error_provider`, `provider_timeout_provider`, `malformed_body_provider`, `empty_content_provider`, `whitespace_content_provider` |
+| `grounding_inputs.py` | Retrieved chunks (`INTERNAL_CHUNK`, `EXTERNAL_CHUNK`, `MALFORMED_CHUNK_CONTENT`) and the `chunk_list` builder |
+| `ollama_transport.py` | Scripted upstream bodies (`VALID_OLLAMA_BODY`, `NO_MESSAGE_BODY`, `NO_CONTENT_BODY`, `NON_JSON_BODY`, `MODEL_NOT_FOUND_BODY`), plus `install_transport`, `install_upstream`, `connect_error`, `ollama_provider`, `CHAT_URL`, `FIXTURE_MODEL` |
+| `expected_outputs.py` | Hand-written expectations: `EXPECTED_GROUNDED_DEPENDENCIES`, `EXPECTED_UNGROUNDED_DEPENDENCIES`, `CONFIDENCE_LEVELS`, `EXPECTED_CONFIRMED_LEVEL` / `EXPECTED_INFERRED_LEVEL` / `EXPECTED_UNKNOWN_LEVEL`, `FABRICATED_REPOSITORY_FACTS`, `PRODUCIBLE_EVIDENCE_SOURCE_TYPES`, `RESERVED_EVIDENCE_SOURCE_TYPES` |
+
+Fixture properties, as documented in `tests/fixtures/__init__.py`:
+
+- **Deterministic** — the same fixture always produces byte-identical input, so
+  a failing assertion is always reproducible.
+- **Safe** — source snippets are two to six lines of trivial synthetic code
+  (`def add(a, b): return a + b`). No repository source, credentials, or
+  customer data appear anywhere in the package.
+- **Offline** — nothing opens a socket, spawns a process, or reads the
+  filesystem. The scripted transports are aimed at the never-resolvable
+  `ollama.test` host, so a patching mistake cannot reach a real server.
+
+To use a fixture from a new test:
+
+```python
+from tests.fixtures import explanation_input, static_provider, EXPLANATION_TEXT
+
+result = await _analyse(explanation_input(), static_provider(EXPLANATION_TEXT))
+```
+
+### Failure-state coverage
+
+`tests/integration/test_failure_states.py` provokes each failure for real — a
+real `OllamaProvider` performing a real request against a scripted transport, or
+a real route handling a real exception — and asserts the documented, graceful
+response. No test doubles the engine's own error handling.
+
+| # | Failure state | How it is provoked | Expected HTTP result |
+|---|---|---|---|
+| 1 | AI engine unavailable | `_build_provider` raises | `503 PROVIDER_UNAVAILABLE` on both `/ready` and the analysis route, with identical codes |
+| 2 | Ollama unavailable (daemon down) | `httpx.ConnectError` | `502 PROVIDER_ERROR` — explicitly **not** `PROVIDER_TIMEOUT` |
+| 3 | Model unavailable (tag not pulled) | HTTP `404` + Ollama's "try pulling it first" body | `502 PROVIDER_ERROR`; the upstream text is not quoted back |
+| 4 | Provider timeout | `httpx.ReadTimeout` and `httpx.ConnectTimeout` | `504 PROVIDER_TIMEOUT`; the configured budget is not disclosed |
+| 5 | Malformed AI response | HTTP `200` with no `message`, no `content`, `{}`, or a non-JSON HTML body | `502 PROVIDER_ERROR`; a well-formed `200` still succeeds (control case) |
+| 6 | Invalid input | blank `source_code`, blank `question`/`context`/`file_path`, `analyses: null` | `422 VALIDATION_ERROR` before any provider call; the payload is not echoed |
+| 7 | No evidence | request without `file_path`; bare `def add(a, b)` snippet | `200` with `confidence.level == "UNKNOWN"`, never `CONFIRMED` |
+| 8 | Insufficient context | confident prose about absent history; unparseable `context` | `structure` stays `null`, `improvements` stays `[]`, reserved evidence types are never emitted, unparseable context yields `dependencies.dependencies == []` |
+
+Every failure additionally asserts the same cross-cutting invariants: the body
+is exactly `{"error": {"code", "message"}}`, the code is one of the five
+contract codes, and **no failure ever returns `summary`, `metadata`, or
+`confidence`** — a failure must not yield a plausible answer.
+
+`tests/integration/test_response_contract.py` additionally covers the
+pre-baked-`ProviderError` mapping to 502/503/504, and
+`tests/integration/test_provider_error_handling.py` covers the provider's own
+error strings. `test_failure_states.py` deliberately does not repeat them — it
+tests one layer further out, the composition of real upstream condition → real
+provider → real route → real status mapping.
+
+### E2E scenario coverage
+
+`tests/integration/test_e2e_user_scenarios.py` (31 tests) drives complete user
+journeys through the real stack and asserts the whole user-visible outcome,
+rather than one contract property at a time.
+
+| Scenario | How a user reaches it today | Tests |
+|---|---|---|
+| Code explanation | `analyses=["explanation"]` | 4 |
+| Why / reasoning | the `question` field, answered ahead of general analyses | 6 |
+| Relationships / context | the `context` field plus retrieved chunks | 7 |
+| Impact analysis | `analyses=["dependencies"]` → `dependencies.impacts` | 3 |
+| Debugging | `analyses=["error_explanation"]` plus error context | 4 |
+| Onboarding | an onboarding question through the ordinary endpoint | 4 |
+| Cross-scenario invariants | every reachable scenario keeps optional fields empty | 1 function, parametrised over 3 request builders |
+
+**VERIFIED — the exposure boundary this file records.** The specialised agents in
+`app/agents/` (seven modules, eight agent classes — `debug_impact.py` provides
+both `DebugAgent` and `ImpactAgent`) are **not wired into the HTTP surface**:
+`app/main.py` exposes exactly three paths (`GET /health`, `GET /ready`,
+`POST /api/v1/code-understanding`) and the analysis route goes through
+`OrchestratorService` alone. Each scenario is therefore expressed through the
+capability a user can actually invoke today. Agent-level behaviour is covered
+separately by the `tests/test_*_agent.py` unit modules.
+
+The scenarios also pin the honesty guarantees: no scenario asserts a structured
+field the orchestrator does not populate, "source code is reflected accurately"
+is verified as *the model was given the real snippet byte-for-byte* plus
+*structured output is derived from it* (not as a judgement about prose from a
+stub), and no live LLM is involved.
+
+### CI-safe testing
+
+**VERIFIED.** The suite can run on a clean machine with no external services:
+
+| Requirement | Needed for the test suite? |
+|---|---|
+| Running Ollama instance | **No** — scripted transports only |
+| `qwen3:8b` (or any model) downloaded | **No** — no test loads weights |
+| `MODEL` / `PROVIDER` / `PROVIDER_BASE_URL` / `REQUEST_TIMEOUT` set | **No** — all have defaults in `app/config.py` |
+| `PROVIDER_API_KEY` or any external API credential | **No** — `ollama` needs no key |
+| Outbound internet access | **No** — nothing opens a real socket |
+| Database, vector store, GPU | **No** — not used by the service at all |
+| Python packages | **Yes** — `pip install -r requirements.txt` |
+| Working directory | `apps/ai-engine` (or run with `python -m pytest apps/ai-engine/tests -q` from the repository root) |
+
+Because every provider is deterministic, the results are identical on every
+machine, and no test can be made flaky by a slow or absent model server. A CI
+job therefore needs only Python plus `pip install -r requirements.txt`.
+
+> **CI wiring:** the commands on this page are the complete, verified recipe.
+> A workflow that automates them must run exactly these commands and must not
+> add an Ollama service, a model download, a credential, or a network
+> dependency — see [CI-safe testing](#ci-safe-testing) for what the suite is
+> allowed to assume.
+
+### Known testing limitations
+
+- **BLOCKER — live `qwen3:8b` full-analysis timeout.** A real
+  `POST /api/v1/code-understanding` against `qwen3:8b` does not currently
+  complete; see
+  [the live `qwen3:8b` timeout](#live-qwen38b-full-analysis-timeout-blocker).
+  The suite does not attempt it: `tests/integration/test_failure_states.py`
+  exercises the timeout as a deterministic transport condition instead. There
+  is no live end-to-end test, and no test asserts a real model answer.
+- **Agents are not covered through HTTP.** Because the agents in `app/agents/`
+  are not exposed on the HTTP surface, there is no integration test that reaches
+  an agent by URL. Agent behaviour is unit-tested only.
+- **Structured response fields are not asserted as populated.**
+  `OrchestratorService._parse_response` populates only `summary`, `metadata`,
+  `confidence`, and `dependencies`; `explanation`, `error_explanation`, and
+  `structure` are asserted `None` and `improvements` asserted `[]`. Tests must
+  not assert otherwise without a corresponding implementation change.
+- **Evaluation covers engine logic, not model prose.** The evaluation suite
+  evaluates grounding, confidence, and traceability using deterministic
+  providers. Evaluating `qwen3:8b`'s prose quality is **NOT IMPLEMENTED**,
+  because it is not reproducible and therefore cannot gate a commit.
+- **No performance, load, or soak testing.** No timing, latency, or throughput
+  claim is tested or made anywhere in this repository.
+- **Coverage tooling is not configured.** `pytest.ini` sets no `--cov`, and
+  `pytest-cov` is not a dependency. Do not quote a coverage percentage.
+- **The test tree is not shipped in the Docker image** — `.dockerignore`
+  excludes `tests/`. Tests run on the host.
 
 ---
 
@@ -1188,7 +1738,7 @@ result = agent.analyse(ctx)
 
 ---
 
-## Current limitations
+## Current limitations and known blockers
 
 - **Only Ollama** is supported as a provider (`PROVIDER=ollama`).
 - **Free-text summary only** — structured response fields (`explanation`, `structure`,
@@ -1225,3 +1775,50 @@ result = agent.analyse(ctx)
   not be fully captured.
 - **Debug Agent stack trace parsing** — designed for Python-style tracebacks;
   other languages' stack trace formats may not be fully parsed.
+
+### Live `qwen3:8b` full-analysis timeout (BLOCKER)
+
+**Status: BLOCKER — diagnosed, not fixed.** This is the one known defect in the
+provider path. It is documented here so nobody mistakes it for a configuration
+mistake on their side.
+
+**VERIFIED facts (Phase 13 diagnosis, recorded in
+`tests/integration/test_failure_states.py`):**
+
+| Fact | Status |
+|---|---|
+| `qwen3:8b` exists on the Ollama server | VERIFIED |
+| `GET /api/tags` is reachable and lists the model | VERIFIED |
+| A simple `POST /api/chat` with a short prompt succeeds | VERIFIED |
+| `POST /api/v1/code-understanding` (full analysis) times out | VERIFIED |
+| The timeout reproduces at both `REQUEST_TIMEOUT=60` and `REQUEST_TIMEOUT=120` | VERIFIED |
+| The blocker is the provider path in `app/providers/ollama.py` | VERIFIED |
+
+The response is `504 PROVIDER_TIMEOUT`. Two facts in `app/providers/ollama.py`
+explain why:
+
+- The request is sent with `"stream": False` and **no generation cap** — the
+  payload carries only `model`, `messages`, `stream`, and optionally
+  `options.temperature`. There is no `num_predict` and no thinking-mode control.
+- Only `data["message"]["content"]` is read. `qwen3:8b` is a thinking model, so
+  its reasoning trace arrives in `message.thinking`, which the provider discards;
+  with no generation cap and `stream: False`, generation does not finish inside
+  the read timeout.
+
+**There is no fix available in this repository today.** Streaming support, a
+generation cap, and thinking-mode handling are **NOT IMPLEMENTED** and belong to
+the OllamaProvider architecture — do not treat any of them as an available
+configuration option. Raising `REQUEST_TIMEOUT` only moves the deadline.
+
+Until it is fixed:
+
+- Use a model tag that answers within your budget, if one exists on your server
+  (`ollama list`).
+- Treat `504 PROVIDER_TIMEOUT` as retryable in callers. The engine never
+  fabricates an answer in this state — the body is the error envelope only, with
+  no `summary`, `metadata`, or `confidence`.
+- The test suite does not exercise this path: the timeout is covered as a
+  deterministic transport condition in `tests/integration/test_failure_states.py`,
+  so there is no live end-to-end test and no test asserting a real model answer.
+
+Full diagnosis steps: [TROUBLESHOOTING.md §18](TROUBLESHOOTING.md#18-qwen38b-full-analysis-timeout-blocker).
