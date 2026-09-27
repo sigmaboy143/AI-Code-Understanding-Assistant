@@ -46,6 +46,14 @@ class OllamaProvider(LLMProvider):
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Send *request* to the Ollama chat endpoint and return the response.
 
+        Generation parameters are translated into Ollama's ``options`` object:
+
+        - ``LLMRequest.temperature`` → ``options.temperature``
+        - ``LLMRequest.max_tokens``   → ``options.num_predict``
+
+        ``options`` is omitted entirely when neither is set, so the server
+        default applies rather than a value invented here.
+
         Raises
         ------
         ProviderError
@@ -59,8 +67,18 @@ class OllamaProvider(LLMProvider):
             ],
             "stream": False,
         }
+
+        options: dict[str, float | int] = {}
         if request.temperature is not None:
-            payload["options"] = {"temperature": request.temperature}
+            options["temperature"] = request.temperature
+        # ``max_tokens`` is Ollama's ``options.num_predict``.  Sending it is what
+        # bounds the completion: with ``stream: False`` the response body is not
+        # written until generation ends, so an uncapped thinking model can run
+        # past the read timeout and surface as a 504 (Phase 13).
+        if request.max_tokens is not None:
+            options["num_predict"] = request.max_tokens
+        if options:
+            payload["options"] = options
 
         url = f"{self._base_url}/api/chat"
 
@@ -97,6 +115,13 @@ class OllamaProvider(LLMProvider):
                 f"Ollama response parse error: {exc}", provider="ollama"
             ) from exc
 
+        # Thinking models (``qwen3``) split the reply in two: ``message.thinking``
+        # carries the reasoning trace and ``message.content`` carries the answer.
+        # Only ``message.content`` is read, so the trace is discarded rather than
+        # prepended to the summary.  A trace left with no room for an answer
+        # yields an empty ``content``; that is returned unchanged so the output
+        # validation pipeline — not this transport layer — decides the
+        # documented fallback.  Nothing here invents content.
         return LLMResponse(
             content=content,
             model=data.get("model"),

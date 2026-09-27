@@ -22,13 +22,18 @@ Failure states covered
 What is deliberately *not* here
 -------------------------------
 The live ``qwen3:8b`` timeout is **not** re-run.  It was diagnosed in Phase 13
-and its cause is a provider/model generation-behaviour defect owned by the
-architecture phase: ``qwen3:8b`` is a thinking model, so its reasoning trace
-arrives in ``message.thinking``, which ``OllamaProvider.complete`` discards,
-and no generation cap is ever sent, so with ``stream: False`` generation
-cannot finish inside the read timeout.  Repeating a 120-second call would
-prove nothing new and would make the suite unusable, so the timeout is
-exercised here as a deterministic transport condition instead.
+and its cause was fixed: no generation cap was ever sent upstream, so with
+``stream: False`` an uncapped completion could not finish inside the read
+timeout and surfaced as a 504.  ``OllamaProvider.complete`` now maps
+``LLMRequest.max_tokens`` to ``options.num_predict`` and the reasoning layer
+bounds the analysis path, so the live call terminates.  Discarding the
+``message.thinking`` trace was never the fault — ``message.content`` is the
+answer, and a trace must not be prepended to it.
+
+A live ``qwen3:8b`` run still costs ~1–2 minutes, so it belongs in a manual
+integration check rather than here; repeating it would make the suite
+unusable.  The timeout is therefore exercised below as a deterministic
+transport condition, which is what the mapping actually depends on.
 
 Relationship to the existing failure tests
 ------------------------------------------
