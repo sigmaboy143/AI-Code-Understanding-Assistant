@@ -21,10 +21,15 @@ import { ExplanationsModule } from './explanations/explanations.module.js';
 import { ConversationsModule } from './conversations/conversations.module.js';
 import { OnboardingModule } from './onboarding/onboarding.module.js';
 import { HealthModule } from './health/health.module.js';
+import { CommonModule } from './common/common.module.js';
 import { createValidationPipe } from './common/validation/validation-pipe.js';
 
 @Module({
   imports: [
+    // Registered once, at the root. CommonModule owns the correlation
+    // middleware configuration and is the single source of LOG_SINK/AppLogger;
+    // feature modules import it themselves rather than re-providing either.
+    CommonModule,
     AuthModule,
     UsersModule,
     OrganizationsModule,

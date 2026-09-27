@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { getCorrelationId } from '../common/correlation/request-correlation.js';
 import { AnalyzeCodeDto } from './dto/analyze-code.dto.js';
 import { AnalyzeFileDto } from './dto/analyze-file.dto.js';
 import type { IAnalysisProvider } from './interfaces/analysis-provider.interface.js';
@@ -15,7 +16,7 @@ export class AnalysisService {
 
   analyzeCode(dto: AnalyzeCodeDto): Promise<AnalysisResult> {
     return this.analysisProvider.analyzeCode({
-      requestId: randomUUID(),
+      requestId: getCorrelationId() ?? randomUUID(),
       language: dto.language,
       code: dto.code,
       filePath: dto.filePath,
@@ -25,7 +26,7 @@ export class AnalysisService {
 
   analyzeFile(dto: AnalyzeFileDto): Promise<AnalysisResult> {
     return this.analysisProvider.analyzeCode({
-      requestId: randomUUID(),
+      requestId: getCorrelationId() ?? randomUUID(),
       language: dto.language,
       code: dto.code,
       filePath: dto.filePath,

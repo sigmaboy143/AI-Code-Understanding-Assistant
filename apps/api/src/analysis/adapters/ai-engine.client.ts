@@ -1,4 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { performance } from 'perf_hooks';
+import { AppLogger } from '../../common/logging/app-logger.js';
+import { getCorrelationId } from '../../common/correlation/request-correlation.js';
 import type { AiEngineConfig } from '../config/ai-engine.config.js';
 import { AI_ENGINE_CONFIG } from '../config/ai-engine.config.js';
 import type { AiEngineRequestContract } from '../contracts/ai-engine-request.contract.js';
@@ -6,6 +9,20 @@ import type {
   AiEngineErrorEnvelope,
   AiEngineResponseContract,
 } from '../contracts/ai-engine-response.contract.js';
+
+// ---------------------------------------------------------------------------
+// Paths
+//
+// Declared once and used for BOTH endpoint construction and the `path` log
+// field, so a URL and its logged path can never drift apart. The resulting URLs
+// are byte-identical to the Phase 3 literals; the existing endpoint assertions
+// in the spec are what prove it.
+
+const ANALYSIS_PATH = '/api/v1/code-understanding';
+const READINESS_PATH = '/ready';
+
+/** Constant message for every AI Engine interaction log line. */
+const INTERACTION_MESSAGE = 'ai_engine_interaction';
 
 // ---------------------------------------------------------------------------
 // Typed error
@@ -47,16 +64,20 @@ const STATUS_TO_CODE: Readonly<Record<number, AiEngineClientErrorCode>> = {
 export class AiEngineClient {
   private readonly endpoint: string;
   private readonly readinessEndpoint: string;
+  private readonly logger: AppLogger;
 
   constructor(
     @Inject(AI_ENGINE_CONFIG)
     private readonly config: AiEngineConfig,
+    logger: AppLogger,
   ) {
-    this.endpoint = `${config.baseUrl}/api/v1/code-understanding`;
-    this.readinessEndpoint = `${config.baseUrl}/ready`;
+    this.endpoint = `${config.baseUrl}${ANALYSIS_PATH}`;
+    this.readinessEndpoint = `${config.baseUrl}${READINESS_PATH}`;
+    this.logger = logger.withContext('AiEngineClient');
   }
 
   async post(body: AiEngineRequestContract): Promise<AiEngineResponseContract> {
+    const startedAt = performance.now();
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
@@ -80,8 +101,24 @@ export class AiEngineClient {
         'name' in err &&
         (err as { name?: unknown }).name === 'AbortError'
       ) {
+        this.logInteraction('warn', {
+          operation: 'post',
+          path: ANALYSIS_PATH,
+          status: null,
+          durationMs: this.elapsedSince(startedAt),
+          code: 'timeout',
+          outcome: 'error',
+        });
         throw new AiEngineClientError('timeout');
       }
+      this.logInteraction('error', {
+        operation: 'post',
+        path: ANALYSIS_PATH,
+        status: null,
+        durationMs: this.elapsedSince(startedAt),
+        code: 'network_error',
+        outcome: 'error',
+      });
       throw new AiEngineClientError(
         'network_error',
         err instanceof Error ? err.message : String(err),
@@ -91,7 +128,16 @@ export class AiEngineClient {
     clearTimeout(timer);
 
     if (response.ok) {
-      return response.json() as Promise<AiEngineResponseContract>;
+      const parsed = (await response.json()) as AiEngineResponseContract;
+      this.logInteraction('info', {
+        operation: 'post',
+        path: ANALYSIS_PATH,
+        status: response.status,
+        durationMs: this.elapsedSince(startedAt),
+        code: 'success',
+        outcome: 'success',
+      });
+      return parsed;
     }
 
     // Attempt to parse the AI Engine error envelope
@@ -105,6 +151,20 @@ export class AiEngineClient {
 
     const code: AiEngineClientErrorCode =
       STATUS_TO_CODE[response.status] ?? 'internal_error';
+
+    this.logInteraction(
+      typeof response.status === 'number' && response.status >= 500
+        ? 'error'
+        : 'warn',
+      {
+        operation: 'post',
+        path: ANALYSIS_PATH,
+        status: response.status,
+        durationMs: this.elapsedSince(startedAt),
+        code,
+        outcome: 'error',
+      },
+    );
 
     throw new AiEngineClientError(code, upstreamMessage);
   }
@@ -131,6 +191,7 @@ export class AiEngineClient {
    *   upstream text is retained for callers to leak.
    */
   async checkReadiness(): Promise<void> {
+    const startedAt = performance.now();
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
@@ -152,8 +213,24 @@ export class AiEngineClient {
         'name' in err &&
         (err as { name?: unknown }).name === 'AbortError'
       ) {
+        this.logInteraction('warn', {
+          operation: 'checkReadiness',
+          path: READINESS_PATH,
+          status: null,
+          durationMs: this.elapsedSince(startedAt),
+          code: 'timeout',
+          outcome: 'error',
+        });
         throw new AiEngineClientError('timeout');
       }
+      this.logInteraction('error', {
+        operation: 'checkReadiness',
+        path: READINESS_PATH,
+        status: null,
+        durationMs: this.elapsedSince(startedAt),
+        code: 'network_error',
+        outcome: 'error',
+      });
       throw new AiEngineClientError(
         'network_error',
         err instanceof Error ? err.message : String(err),
@@ -163,6 +240,14 @@ export class AiEngineClient {
     clearTimeout(timer);
 
     if (response.ok) {
+      this.logInteraction('info', {
+        operation: 'checkReadiness',
+        path: READINESS_PATH,
+        status: response.status,
+        durationMs: this.elapsedSince(startedAt),
+        code: 'success',
+        outcome: 'success',
+      });
       return;
     }
 
@@ -170,6 +255,78 @@ export class AiEngineClient {
     const code: AiEngineClientErrorCode =
       STATUS_TO_CODE[response.status] ?? 'internal_error';
 
+    this.logInteraction(
+      typeof response.status === 'number' && response.status >= 500
+        ? 'error'
+        : 'warn',
+      {
+        operation: 'checkReadiness',
+        path: READINESS_PATH,
+        status: response.status,
+        durationMs: this.elapsedSince(startedAt),
+        code,
+        outcome: 'error',
+      },
+    );
+
     throw new AiEngineClientError(code);
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 6 observability
+  //
+  // Every AI Engine interaction produces exactly one log entry, emitted from
+  // exactly one of the four mutually exclusive exit paths above. The single
+  // emit helper below is the only writer, so double-logging is structurally
+  // impossible rather than merely avoided.
+  //
+  // Only the allowlisted structured fields are supplied. In particular the
+  // upstream error message is NOT logged: it is arbitrary text from another
+  // service and the approved allowlist has no field for it. `code` carries the
+  // controlled AiEngineClient outcome token, which is what an operator needs to
+  // triage a failure. Adding a sanitized upstream message would be a separate,
+  // explicitly reviewed security change.
+  //
+  // The request ID is read from the correlation context and is undefined when
+  // the client is exercised directly in a unit test. No second ID is invented
+  // here: the middleware owns ID creation.
+
+  private elapsedSince(startedAt: number): number {
+    const elapsed = performance.now() - startedAt;
+    // Guarantees the logged duration is always a finite, non-negative number,
+    // including under fake timers where performance.now may not advance.
+    return Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
+  }
+
+  private logInteraction(
+    level: 'info' | 'warn' | 'error',
+    fields: {
+      operation: string;
+      path: string;
+      status: number | null;
+      durationMs: number;
+      code: string;
+      outcome: string;
+    },
+  ): void {
+    const payload = {
+      operation: fields.operation,
+      path: fields.path,
+      // undefined rather than null: the redactor drops both, and a missing
+      // status correctly signals that no HTTP response was ever received.
+      status: fields.status ?? undefined,
+      durationMs: fields.durationMs,
+      code: fields.code,
+      outcome: fields.outcome,
+      requestId: getCorrelationId(),
+    };
+
+    if (level === 'warn') {
+      this.logger.warn(INTERACTION_MESSAGE, payload);
+    } else if (level === 'error') {
+      this.logger.error(INTERACTION_MESSAGE, payload);
+    } else {
+      this.logger.info(INTERACTION_MESSAGE, payload);
+    }
   }
 }
