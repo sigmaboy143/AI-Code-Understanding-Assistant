@@ -29,12 +29,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.logging_context import (
+    REQUEST_ID_HEADER,
+    correlation_suffix,
+    new_request_id,
+    set_request_id,
+)
 from app.orchestrator import OrchestratorService
 from app.providers.base import ProviderError
 from app.schemas.code_understanding import (
@@ -44,6 +52,24 @@ from app.schemas.code_understanding import (
 from app.schemas.errors import make_error
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Logging configuration
+# ---------------------------------------------------------------------------
+# Without this, the ``app.*`` loggers propagate to a root logger that has no
+# handler, so Python's ``lastResort`` handler emits WARNING and above only —
+# which would silently discard every INFO line the access log and the provider
+# timing depend on.  ``basicConfig`` is a no-op when the root logger already
+# has a handler, so an operator's own configuration always wins.
+_LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+logging.basicConfig(
+    level=_LOG_LEVEL,
+    format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
+)
+
+#: Probes are logged at DEBUG so a readiness poll every few seconds cannot
+#: bury the lines an operator actually needs.
+_QUIET_PATHS = frozenset({"/health", "/ready"})
 
 # ---------------------------------------------------------------------------
 # Provider construction
@@ -82,6 +108,48 @@ app = FastAPI(
 
 
 # ---------------------------------------------------------------------------
+# Request correlation and access log
+# ---------------------------------------------------------------------------
+
+
+@app.middleware("http")
+async def _access_log(request: Request, call_next):
+    """Bind a request identifier and log one line per completed request.
+
+    Every response — success, provider failure, or validation rejection —
+    produces exactly one line carrying the request id, method, path, status,
+    and wall-clock duration.  That is the minimum needed to answer "which
+    request was slow?" and "which log lines belong to this failure?".
+
+    The identifier is taken from an inbound ``X-Request-ID`` when present so an
+    upstream service's own correlation id is preserved, and is echoed back on
+    the response so a caller can quote it.  This adds a response header only;
+    the documented JSON bodies are unchanged.
+    """
+    request_id = request.headers.get(REQUEST_ID_HEADER) or new_request_id()
+    set_request_id(request_id)
+
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers[REQUEST_ID_HEADER] = request_id
+        return response
+    finally:
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        suffix = correlation_suffix(
+            method=request.method,
+            path=request.url.path,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            outcome="ok" if status_code < 400 else "error",
+        )
+        log = logger.debug if request.url.path in _QUIET_PATHS else logger.info
+        log("request completed%s", suffix)
+
+
+# ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
 
@@ -91,6 +159,9 @@ async def _validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     """Override FastAPI's default 422 handler to use the stable error envelope."""
+    # The rejected field values are deliberately not logged: a rejected payload
+    # is unvalidated caller input and may contain anything.
+    logger.info("request rejected%s", correlation_suffix(outcome="validation_error"))
     return JSONResponse(
         status_code=422,
         content=make_error("VALIDATION_ERROR", "Request validation failed."),
@@ -100,7 +171,10 @@ async def _validation_error_handler(
 @app.exception_handler(Exception)
 async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all for any exception that escapes the route handler."""
-    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    logger.exception(
+        "unhandled exception%s",
+        correlation_suffix(method=request.method, path=request.url.path, outcome="internal_error"),
+    )
     return JSONResponse(
         status_code=500,
         content=make_error("INTERNAL_ERROR", "An unexpected error occurred."),
@@ -172,7 +246,18 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
     try:
         provider = _build_provider()
     except Exception as exc:
-        logger.error("Failed to build provider: %s", exc)
+        # The configured provider name plus the exception type fully identify
+        # this failure (the only raise here is an unknown provider name), so the
+        # exception *message* is not logged — a broad handler must never be the
+        # place arbitrary text starts reaching the log.
+        logger.error(
+            "failed to build provider%s",
+            correlation_suffix(
+                provider=settings.provider,
+                outcome="provider_unavailable",
+                detail=type(exc).__name__,
+            ),
+        )
         return JSONResponse(
             status_code=503,
             content=make_error(
@@ -190,7 +275,13 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
         msg = str(exc)
         # Distinguish timeout from generic provider errors.
         if any(kw in msg.lower() for kw in _TIMEOUT_KEYWORDS):
-            logger.warning("Provider timeout: %s", msg)
+            logger.warning(
+                "provider timeout%s",
+                correlation_suffix(
+                    provider=exc.provider or settings.provider,
+                    outcome="provider_timeout",
+                ),
+            )
             return JSONResponse(
                 status_code=504,
                 content=make_error(
@@ -198,7 +289,17 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
                     "The AI provider did not respond in time. Please try again.",
                 ),
             )
-        logger.error("Provider error: %s", msg)
+        # ``msg`` is constructed by the provider from its own status code and
+        # base URL.  It never carries the upstream response body or the API key,
+        # and it is not sent to the caller, so it is safe to log.
+        logger.error(
+            "provider error%s",
+            correlation_suffix(
+                provider=exc.provider or settings.provider,
+                outcome="provider_error",
+                detail=msg,
+            ),
+        )
         return JSONResponse(
             status_code=502,
             content=make_error(
@@ -208,7 +309,12 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
         )
 
     except asyncio.TimeoutError:
-        logger.warning("asyncio timeout waiting for provider")
+        logger.warning(
+            "asyncio timeout waiting for provider%s",
+            correlation_suffix(
+                provider=settings.provider, outcome="provider_timeout"
+            ),
+        )
         return JSONResponse(
             status_code=504,
             content=make_error(
@@ -218,7 +324,14 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
         )
 
     except Exception as exc:
-        logger.exception("Unexpected error during analysis: %s", exc)
+        logger.exception(
+            "unexpected error during analysis%s",
+            correlation_suffix(
+                provider=settings.provider,
+                outcome="internal_error",
+                detail=type(exc).__name__,
+            ),
+        )
         return JSONResponse(
             status_code=500,
             content=make_error("INTERNAL_ERROR", "An unexpected error occurred."),
