@@ -122,6 +122,7 @@ the variables below, not a file the application consumes.
 | `PROVIDER_BASE_URL`| `http://localhost:11434`   | Base URL for self-hosted providers (Ollama)                           |
 | `REQUEST_TIMEOUT`  | `60`                       | Seconds to wait for a provider response before raising a 504 error   |
 | `PROVIDER_API_KEY` | *(not set)*                | API key for cloud providers (OpenAI, Anthropic). Not used for Ollama |
+| `LOG_LEVEL`        | `INFO`                     | Root log level. `DEBUG` also records the `/health` and `/ready` probes |
 
 > **Note:** `HOST` and `PORT` are read by `app/config.py`. When you start the
 > server with `uvicorn --host ... --port ...`, those CLI flags take precedence
@@ -685,6 +686,45 @@ jobs:
 the repository; real `.env` files are git-ignored. `PROVIDER_API_KEY` is read
 from the environment and never stored in the repository, and no API response
 includes it.
+
+## Logging and observability
+
+Every completed request produces exactly one access-log line, and every log line
+produced while serving a request carries the same `request_id`. Fields are
+emitted as `key=value` pairs inside the message, so they are visible under any
+log formatter without the service shipping a logging configuration.
+
+| Signal | Where it appears |
+|---|---|
+| `request_id` | every line, and the `X-Request-ID` response header |
+| `service` | every line, always `ai-engine` |
+| `method`, `path` | every access-log line |
+| `status_code` | every access-log line |
+| `duration_ms` | every access-log line — total request wall clock |
+| `provider_call_ms` | provider lines only — time spent inside the LLM call |
+| `provider`, `model` | provider lines |
+| `outcome` | `ok`, `error`, `validation_error`, `provider_error`, `provider_timeout`, `provider_unavailable`, `internal_error` |
+
+`duration_ms` and `provider_call_ms` are logged separately so a slow response can
+be attributed to the provider rather than to context assembly or output
+validation.
+
+### Correlation
+
+An inbound `X-Request-ID` header is honoured, and one is generated when absent.
+The value is echoed on the response so a caller can quote it in a bug report.
+This adds a response header only — the documented JSON bodies are unchanged.
+
+`/health` and `/ready` are logged at `DEBUG` so a readiness poll every few
+seconds cannot bury the lines that matter. Set `LOG_LEVEL=DEBUG` to see them.
+
+### What is never logged
+
+API keys, request bodies, source code, supplied context, model output, and
+upstream response bodies. A provider failure logs the provider's own status
+code and base URL — never the payload the provider returned. Rejected (422)
+payloads are not logged at all, because unvalidated caller input may contain
+anything.
 
 ---
 

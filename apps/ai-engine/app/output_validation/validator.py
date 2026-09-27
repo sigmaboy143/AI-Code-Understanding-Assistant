@@ -54,7 +54,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from app.evidence.models import ConfidenceLevel, ResponseConfidence
+from app.evidence.models import ResponseConfidence
 from app.providers.base import LLMResponse
 
 if TYPE_CHECKING:

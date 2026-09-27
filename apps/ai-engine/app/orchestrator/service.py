@@ -28,9 +28,12 @@ Design notes
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Sequence
 
 from app.context_builder import ContextBuilder
+from app.logging_context import correlation_suffix
 from app.output_validation import validate_llm_response
 from app.output_validation.dependencies import build_dependency_analysis
 from app.providers.base import LLMProvider, LLMRequest, LLMResponse
@@ -43,6 +46,8 @@ from app.schemas.code_understanding import (
     DependencyAnalysis,
     ProgrammingLanguage,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OrchestratorService:
@@ -110,7 +115,36 @@ class OrchestratorService:
         llm_request = self._build_llm_request(request, built_context.included_chunks or None)
 
         # ── Provider call (ProviderError propagates upward) ──────────────
-        llm_response = await self._provider.complete(llm_request)
+        # Timed separately from the overall request so a slow response can be
+        # attributed to the provider rather than to context assembly or
+        # validation.  Only the provider's name and the elapsed milliseconds
+        # are logged — never the prompt, the source code, or the completion.
+        provider_started = time.perf_counter()
+        try:
+            llm_response = await self._provider.complete(llm_request)
+        except Exception:
+            logger.warning(
+                "provider call failed%s",
+                correlation_suffix(
+                    provider=type(self._provider).__name__,
+                    provider_call_ms=round(
+                        (time.perf_counter() - provider_started) * 1000, 2
+                    ),
+                    outcome="provider_error",
+                ),
+            )
+            raise
+        logger.info(
+            "provider call completed%s",
+            correlation_suffix(
+                provider=type(self._provider).__name__,
+                model=llm_response.model or "unknown",
+                provider_call_ms=round(
+                    (time.perf_counter() - provider_started) * 1000, 2
+                ),
+                outcome="ok",
+            ),
+        )
 
         # ── Task 10: validate + normalise the response ───────────────────
         return self._parse_response(llm_response, request, built_context.included_chunks)

@@ -27,7 +27,6 @@ for development and testing.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
