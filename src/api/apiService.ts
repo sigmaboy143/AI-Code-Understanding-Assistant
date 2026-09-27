@@ -131,7 +131,10 @@ async function callBackend<T>(
   const url = `${backendUrl()}${path}`;
   const requestId = options.requestId ?? newRequestId();
   const config = {
-    timeout: options.timeout ?? 30000,
+    // 70s clears the backend's 60s AI timeout, so a slow but successful
+    // analysis is not reported as a client-side timeout. A per-request
+    // `options.timeout` still overrides this default.
+    timeout: options.timeout ?? 70000,
     headers: { [X_REQUEST_ID_HEADER]: requestId },
     // A 201 is the documented success status for the analysis routes. Axios
     // already treats every 2xx as success, so this only documents intent.
