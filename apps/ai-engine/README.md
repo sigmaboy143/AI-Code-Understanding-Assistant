@@ -649,6 +649,22 @@ python -m pytest apps/ai-engine/tests -q
 
 No real LLM service or vector database is required — all tests use in-process mocks.
 
+### Test matrix
+
+[`TEST_MATRIX.md`](TEST_MATRIX.md) maps each capability — explanation, WHY,
+debugging, impact, relationships, architecture, evidence, confidence, onboarding,
+provider failure, timeout, malformed response — to the test files that cover it,
+with the collected test counts, PASS/FAIL, and known limitations.
+
+Two things that table is deliberate about:
+
+- Every test in the suite is **deterministic**; there is no live-provider test.
+  The engine's own logic and failure handling are covered, but a real LLM
+  returning a usable answer is **not**.
+- **Live `qwen3:8b` full code-understanding analysis is FAIL/BLOCKED.** A real
+  request exceeds the 120-second budget and times out (the Phase 13 blocker).
+  Passing timeout *handler* tests do not mean a real request completes.
+
 ### Continuous integration
 
 `.github/workflows/ai-engine.yml` runs the checks above automatically. It is
