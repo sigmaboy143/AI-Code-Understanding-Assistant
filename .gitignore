@@ -149,3 +149,14 @@ vite.config.ts.timestamp-*
 # patterns above (they are unanchored, so they also match `webview-ui/dist`,
 # `webview-ui/node_modules`, and `.vscode-test/`). Repeated here only where the
 # upstream branch made them explicit.
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache / compiled files
+__pycache__/
+*.py[cod]
+.pytest_cache/
