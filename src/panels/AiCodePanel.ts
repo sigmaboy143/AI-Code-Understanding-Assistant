@@ -23,15 +23,22 @@ export class AiCodePanel {
       : vscode.ViewColumn.One;
 
     if (AiCodePanel.currentPanel) {
-      (AiCodePanel.currentPanel._panel as vscode.WebviewPanel).reveal(column);
+      (AiCodePanel.currentPanel._panel as vscode.WebviewPanel).reveal(column, true);
       AiCodePanel.currentPanel._messageHandler = onMessage;
       return AiCodePanel.currentPanel;
     }
 
+    // `preserveFocus` is required, not cosmetic. Creating or revealing a webview
+    // panel makes it the active editor, which clears `vscode.window.activeTextEditor`.
+    // Every command reads its context AFTER `openPanel()` has run, so without this
+    // the context is already null and the command aborts silently — no request,
+    // no error, no webview message. Preserving focus keeps the editor (and the
+    // user's selection) active, which is also what they expect after asking for
+    // an explanation.
     const panel = vscode.window.createWebviewPanel(
       "aiCodePanel",
       "AI Code Understanding",
-      column,
+      { viewColumn: column, preserveFocus: true },
       {
         enableScripts: true,
         localResourceRoots: [
