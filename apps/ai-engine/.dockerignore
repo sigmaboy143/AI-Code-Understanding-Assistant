@@ -1,0 +1,16 @@
+.venv/
+venv/
+env/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.log
+uvicorn.log
+uvicorn_err.log
+.env
+.env.*
+tests/
+pytest.ini
+.git/
+.gitignore

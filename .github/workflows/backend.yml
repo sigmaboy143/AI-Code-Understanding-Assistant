@@ -1,0 +1,70 @@
+# Backend CI — NestJS API (apps/api)
+#
+# Gates the only deliverable whose full suite is verified end to end: lint,
+# unit tests, E2E tests and build all pass locally on Node 22.
+#
+# Deliberately scoped to apps/api only. The VS Code extension and the AI Engine
+# live at different paths on their own branches and the merged layout is not yet
+# decided, so a root-wide multi-service workflow would bake in path assumptions
+# that are not settled. They get their own workflows once the layout is agreed.
+#
+# E2E safety: apps/api/test/app.e2e-spec.ts is fully deterministic. It exercises
+# GET /health, which performs no network I/O, and a validation-pipe rejection
+# that never reaches the AI Engine. This workflow therefore needs no AI Engine,
+# no Ollama and no other service. Do not add one without re-proving determinism.
+
+name: Backend CI
+
+on:
+  push:
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/backend.yml'
+  workflow_dispatch:
+
+# Read-only by default: this workflow never needs to write to the repository.
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Lint, test, E2E and build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Every check below is invoked through its package.json script, never via
+      # bare `npx jest`. This repository compiles TypeScript as ESM and the
+      # scripts carry the required --experimental-vm-modules flag; bypassing
+      # them fails on NestJS's ESM-only packages before any test runs.
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+      - name: Build
+        run: npm run build

@@ -1,0 +1,156 @@
+# =============================================================================
+# Local development / single-host stack: NestJS backend + FastAPI AI Engine.
+#
+# Topology
+# --------
+#   host Ollama :11434
+#        ^  host.docker.internal (Ollama is NEVER containerised)
+#        |
+#   ai-engine container :8000
+#        ^  Compose service name "ai-engine" on the default bridge network
+#        |  (the backend must NEVER use localhost here -- inside a container
+#        |   localhost is the container itself)
+#        |
+#   api container :3000
+#
+# Scope and non-goals
+# -------------------
+#   * No service is defined for Ollama. It runs on the host, because model
+#     weights are large and are not part of this build. The ai-engine service
+#     reaches it through `host.docker.internal`, mapped explicitly below so the
+#     file also works on Linux Docker Engine, where the name is not implicit.
+#   * The VS Code extension / frontend is not containerised.
+#   * This is a local development stack. It is not a production deployment:
+#     there is no authentication, no TLS, and no rate limiting. See
+#     docs/deployment/deployment-guide.md.
+#
+# Secrets
+# -------
+#   This file contains no credentials. Ollama is local and needs no key. The
+#   optional host-port overrides below are read from a gitignored `.env`; see
+#   .env.example for the supported keys.
+# =============================================================================
+
+name: ai-code-understanding-assistant
+
+services:
+  # ---------------------------------------------------------------------------
+  # ai-engine — FastAPI code-understanding service
+  #
+  # Owns the LLM call. It is the only service that talks to Ollama.
+  # ---------------------------------------------------------------------------
+  ai-engine:
+    image: ai-code-assistant-ai-engine:compose
+    build:
+      context: ./apps/ai-engine
+      dockerfile: Dockerfile
+
+    environment:
+      PROVIDER: ollama
+      # llama3 is the model verified end-to-end against host Ollama.
+      # See docs/development/environment.md for the qwen3:8b caveat.
+      MODEL: "${AI_ENGINE_MODEL:-llama3}"
+      # Deliberately NOT http://localhost:11434. Inside a container, localhost
+      # is the container's own loopback, which has no Ollama daemon. The host
+      # gateway name is required.
+      PROVIDER_BASE_URL: http://host.docker.internal:11434
+      REQUEST_TIMEOUT: "${AI_ENGINE_REQUEST_TIMEOUT:-60}"
+
+    # Explicit rather than relying on Docker Desktop's implicit mapping, so the
+    # same file works on Docker Engine for Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # /health, deliberately NOT /ready.
+    #
+    # The AI Engine's /ready performs no LLM call: it only checks that PROVIDER
+    # is a non-empty string, so it returns 200 even when Ollama is stopped or
+    # the model is missing. Using it here would mark the service healthy while
+    # every real analysis request fails. /health proves the process is up, which
+    # is the honest thing for a container probe. Whether Ollama actually answers
+    # is verified by a real analysis request, not by the healthcheck.
+    #
+    # The image ships no curl and no wget, so the probe uses the Python
+    # standard library only.
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    restart: unless-stopped
+
+    # Internal contract port. This is the port the api service dials via the
+    # service name; nothing else may reference it.
+    expose:
+      - "8000"
+
+    # Host port is 8000 when free, else override. The default here is 8002
+    # because 8000 is already taken on the development host; set
+    # AI_ENGINE_HOST_PORT=8000 in .env to claim the conventional port instead.
+    ports:
+      - "${AI_ENGINE_HOST_PORT:-8002}:8000"
+
+  # ---------------------------------------------------------------------------
+  # api — NestJS backend
+  #
+  # Terminal service. It never talks to Ollama; it only proxies to ai-engine.
+  # ---------------------------------------------------------------------------
+  api:
+    image: ai-code-assistant-api:compose
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # Service name resolution over the Compose network. NOT localhost, and
+      # not the published host port: a container-localhost value would point the
+      # backend at itself and fail with a connection error.
+      AI_ENGINE_BASE_URL: http://ai-engine:8000
+      # Must exceed real llama3 inference time (~34s measured on CPU-only
+      # hardware) and matches the AI Engine's own REQUEST_TIMEOUT budget.
+      AI_ENGINE_TIMEOUT_MS: "${AI_ENGINE_TIMEOUT_MS:-60000}"
+
+    # Start only after ai-engine is healthy, so the first real request does not
+    # race the AI Engine's own startup.
+    depends_on:
+      ai-engine:
+        condition: service_healthy
+
+    # /health, deliberately NOT /ready.
+    #
+    # The backend's /ready proxies the AI Engine's /ready, which as noted does
+    # not verify Ollama either. /health is pure liveness and performs no
+    # network I/O, so a downstream slowdown can never trigger a restart loop of
+    # a healthy process. This preserves the established /health semantics.
+    #
+    # node:22-slim ships neither curl nor wget, so the probe uses Node's
+    # built-in global fetch in exec form (no shell, so no variable expansion).
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    restart: unless-stopped
+
+    expose:
+      - "3000"
+
+    # Host port is 3000 when free, else override. Default here is 3002 because
+    # 3000 is already taken on the development host; set API_HOST_PORT=3000 in
+    # .env to claim the conventional port instead.
+    ports:
+      - "${API_HOST_PORT:-3002}:3000"
