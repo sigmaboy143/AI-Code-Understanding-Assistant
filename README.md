@@ -7,6 +7,11 @@ Most AI coding tools optimise for writing. This project optimises for reading:
 given a selection or a file that someone else wrote, explain what it does, show
 the evidence behind that explanation, and be honest when the evidence is weak.
 
+The three layers live in one checkout: a **VS Code extension** with a React
+webview, a **NestJS backend**, and a **FastAPI AI Engine**. The extension is the
+only client of the backend, and the backend is the only caller of the AI Engine.
+No client ever talks to a model provider directly.
+
 ---
 
 ## Current architecture
@@ -14,7 +19,7 @@ the evidence behind that explanation, and be honest when the evidence is weak.
 ```
 Developer
    ↓
-VS Code Extension / React Webview        ← built on feature/member2-vscode-frontend (not merged here)
+VS Code Extension / React Webview        ← PRESENT, extension/member2-vscode-frontend
    ↓
 NestJS Backend  (apps/api, port 3000)    ← PRESENT
    ↓
@@ -23,15 +28,10 @@ AI Engine  (FastAPI, port 8000)          ← PRESENT, apps/ai-engine @ 04faea5
 Ollama / LLM  (port 11434)               ← host process, not containerised
 ```
 
-The backend is the only caller of the AI Engine, and the extension is intended to
-be the only caller of the backend. No client ever talks to a model provider
-directly.
-
-> **Scope of this branch:** the backend **and** the AI Engine both live in this
-> checkout and run end-to-end from a single clone. The VS Code extension is
-> developed on `feature/member2-vscode-frontend` and has **not** been merged
-> here, so it is the only layer absent. Its client code has been validated
-> headlessly against this backend — see
+> **Scope of this branch:** this is the integration branch. The backend, the AI
+> Engine, and the VS Code extension all live in this checkout and run end-to-end
+> from a single clone. The extension's client code was additionally validated
+> headlessly against this backend before the merge — see
 > [Verified integration](#verified-integration).
 
 ### Implementation status at a glance
@@ -40,12 +40,167 @@ directly.
 |---|---|---|
 | NestJS backend | **Implemented** | Lint, build, 455 unit/integration tests, 5 E2E tests all pass |
 | AI Engine | **Implemented** | In `apps/ai-engine`, synchronised from `origin/feature/member3-ai` at `04faea5`. Owned by Member 3. 870 tests pass |
-| VS Code extension + React webview | **Separate branch** | Not in this checkout. Headless build/unit/live-client validation passed against this backend |
+| VS Code extension + React webview | **Implemented** | In this checkout, rooted at the repository root. Owned by Member 2. Headless lint, compile, webview build, unit tests, and a live-client test all passed against this backend |
 | Ollama | **External** | Host process on `11434`; deliberately not containerised. `llama3` and `qwen3:8b` both validated |
 | PostgreSQL | **Not implemented** | No code, no client, no migration |
 | Redis | **Not implemented** | No code, no client |
 | Docker | **Implemented** | `Dockerfile` per service + root `compose.yaml`. Local single-host stack only |
 | CI/CD | **Partial** | One workflow; backend only |
+
+---
+
+## Repository structure
+
+The extension is rooted at the **repository root** (its `package.json`, `src/`,
+and `webview-ui/` live there), while the backend and AI Engine live under
+`apps/`. Root-level `npm` commands therefore belong to the **extension**;
+backend commands must be run from `apps/api`.
+
+```
+.
+├── apps/
+│   ├── api/                  NestJS backend (TypeScript, port 3000)
+│   └── ai-engine/            FastAPI AI Engine (Python 3.11, port 8000)
+├── src/                      VS Code extension host (TypeScript)
+├── webview-ui/               React 18 webview (Vite, Zustand)
+├── out/                      Compiled extension host output (gitignored)
+├── docs/                     Documentation (see below)
+├── .github/workflows/
+│   └── backend.yml           Backend CI
+├── .vscode/                  Extension launch/tasks/settings
+├── .env.example              Optional Compose overrides, no credentials
+├── .gitignore
+├── .vscodeignore             Files excluded from the .vsix
+├── compose.yaml              Backend + AI Engine, two services
+├── package.json              Extension manifest and scripts
+├── tsconfig.json             Extension host TypeScript config
+├── eslint.config.mjs         Extension lint config
+├── CHANGELOG.md              Extension release notes
+├── vsc-extension-quickstart.md
+└── README.md
+```
+
+Still on a separate branch, not merged here:
+
+- `feature/member4-code-intelligence` — the code intelligence module
+
+---
+
+## VS Code extension (Member 2)
+
+A VS Code extension that explains selected code and whole files, and surfaces
+the confidence and evidence behind each answer. The extension is the only client
+of the backend; the backend is the only caller of the AI Engine.
+
+### Features
+
+- **Explain Selected Code** — analyses the current selection via `POST /analysis/code`
+- **Explain File** — analyses the complete active document via `POST /analysis/file`
+- **Relations** — resolves relationships for a file via `GET /relationships`
+- Activity Bar side panel plus a standalone editor panel
+- Confidence and evidence rendered from the backend's own values, never invented
+
+### Panel tabs: real vs mock
+
+The backend currently implements only a few features. The other tabs are kept in
+the UI as clearly-labelled placeholders rather than being removed, and they never
+issue a request to a URL that does not exist.
+
+| Tab | Real backend | Endpoint | Notes |
+| --- | --- | --- | --- |
+| Explain | Yes | `POST /analysis/code`, `POST /analysis/file` | Real result when mock mode is off |
+| Relations | Yes | `GET /relationships?filePath&language` | Route is real; the backend's resolver currently returns an empty array |
+| Why | No | — | Backend capability not currently available |
+| Data | No | — | Backend capability not currently available |
+| History | No | — | Backend capability not currently available |
+| Impact | No | — | Backend capability not currently available |
+| Tests | No | — | Backend capability not currently available |
+| Debug | No | — | Backend capability not currently available |
+| Arch | No | — | Backend capability not currently available |
+| Search | No | — | Demo only; results are fixed strings, not real matches |
+| Chat | No | — | Demo only; replies are placeholders, not analysis |
+
+"Backend capability not currently available" is not an error state. Nothing was
+requested and nothing failed — the feature simply has no HTTP route yet. The
+`conversations`, `tests`, `documentation`, `onboarding`, `auth`, `users`,
+`organizations`, `projects` and `repositories` controllers are declared in the
+backend but declare no route handler, and impact / debugging / architecture / git
+exist only as injectable services with no controller.
+
+### Requirements
+
+- VS Code `^1.138.0`
+- For real (non-mock) mode: the NestJS backend running and reachable. The
+  extension never calls an AI provider directly.
+
+### Extension settings
+
+This extension contributes the following settings:
+
+* `aicode.useMockData` — when `true` (the default) every tab returns locally
+  generated demo data and no HTTP request is made. Set it to `false` to talk to
+  the real backend.
+* `aicode.backendUrl` — base URL of the backend. Defaults to
+  `http://localhost:3000`. A trailing slash is tolerated.
+* `aicode.explanationMode` — default explanation depth: `beginner`,
+  `intermediate` or `advanced`.
+
+### Running the extension
+
+```bash
+npm install
+npm run build-webview   # builds the React webview into webview-ui/dist
+npm run compile         # compiles the extension host to out/
+```
+
+Then press <kbd>F5</kbd> to launch an Extension Development Host.
+
+To run the webview in a plain browser for UI work:
+
+```bash
+npm run watch-webview
+```
+
+Outside VS Code there is no extension host, so no backend call can be made; the
+webview logs outgoing messages to the console instead.
+
+> These commands run at the **repository root** and belong to the extension. The
+> backend's commands are run from `apps/api` instead.
+
+### Extension tests
+
+```bash
+npm run test:unit       # contract/adapter unit tests, no VS Code required
+npm test                # extension-host tests (downloads VS Code on first run)
+```
+
+`pretest` runs `npm run compile && npm run lint` first.
+
+### Correlation
+
+Each real request carries an `X-Request-Id` header. The backend's correlation
+middleware honours it and always echoes one back, so the ID shown under an
+Explain result is the backend's own correlation ID and can be quoted when
+reporting a problem.
+
+### Extension known issues
+
+- Every tab other than Explain and Relations is a placeholder, for the reasons
+  in the table above. They are not wired to the backend because no endpoint
+  exists to wire them to.
+- `GET /relationships` is real but its service resolves to an empty array, so
+  the Relations tab legitimately shows "no relationships" against a live backend.
+- A real analysis returns one `summary`. The What / How / Why sections remain in
+  the panel, but How and Why state that the backend did not provide them rather
+  than being filled with generated prose.
+- The backend caps `code` at 100000 characters. Selecting more than that is
+  reported before the request is sent.
+- The extension's full `vscode-test` GUI suite was not executed; it downloads
+  and launches VS Code. Headless lint, compile, webview build, unit tests, and a
+  live client test all passed.
+
+Authoring guidance: see
+[VS Code Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines).
 
 ---
 
@@ -222,7 +377,7 @@ for `llama3` and 18.5s for `qwen3:8b` on CPU-only hardware, with a slower 27.3s
 against a live model. 60000 matches the AI Engine's own 60s provider budget, so
 the backend's limit is an honest upper bound on the round trip.
 
-### AI Engine (`apps/ai-engine`, separate branch)
+### AI Engine (`apps/ai-engine`)
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -238,14 +393,20 @@ the backend's limit is an honest upper bound on the round trip.
 > `.env.example` to `.env` has no effect. Environment variables must be exported
 > by the shell for now.
 
+### Extension
+
+The extension is configured through VS Code settings, not environment variables:
+`aicode.useMockData`, `aicode.backendUrl`, and `aicode.explanationMode`. See
+[Extension settings](#extension-settings).
+
 Full detail: [docs/development/environment.md](docs/development/environment.md).
 
 ---
 
 ## Local development
 
-Two supported paths. The Compose path is recommended; the bare-metal path is
-kept for debugging.
+Three supported paths. The Compose path is recommended; the bare-metal path is
+kept for debugging; the extension path is separate again.
 
 ### Option A — Docker Compose (recommended)
 
@@ -349,49 +510,46 @@ AI_ENGINE_MODEL=qwen3:8b docker compose up -d --force-recreate ai-engine
 docker compose exec ai-engine python3 -c "from app.config import settings; print(settings.model)"
 ```
 
+### Option C — the extension (repository root)
+
+The extension runs in a VS Code Extension Development Host, not in a container.
+It needs the backend reachable; `aicode.backendUrl` defaults to
+`http://localhost:3000`, so Option B's bare-metal ports are the ones that match
+out of the box.
+
+```bash
+npm install
+npm run build-webview
+npm run compile
+```
+
+Then press <kbd>F5</kbd>. See
+[Running the extension](#running-the-extension).
+
+> **Command collision:** `npm run build`, `npm run lint` and `npm test` at the
+> repository root are the **extension's** scripts. The backend's equivalents
+> must be run from `apps/api`.
+
 ---
 
 ## Testing
 
 | Suite | Command | Deterministic? |
 |---|---|---|
-| Backend unit + integration | `npm test` | **Yes** — fully mocked, no network (19 suites, 455 tests) |
-| Backend E2E smoke | `npm run test:e2e` | **Yes** — no AI Engine, Ollama, or database (1 suite, 5 tests) |
+| Backend unit + integration | `npm test` *(from `apps/api`)* | **Yes** — fully mocked, no network (19 suites, 455 tests) |
+| Backend E2E smoke | `npm run test:e2e` *(from `apps/api`)* | **Yes** — no AI Engine, Ollama, or database (1 suite, 5 tests) |
 | AI Engine unit + integration | `python -m pytest` | **Yes** — uses a mock provider (29 files, 870 tests) |
+| Extension unit (contract/adapter) | `npm run test:unit` *(from root)* | **Yes** — no VS Code download required |
+| Extension host | `npm test` *(from root)* | **Partly** — downloads and launches VS Code on first run |
 | Live end-to-end | the curl in [Option A](#option-a--docker-compose-recommended) | **No** — real Ollama required |
 
 The backend E2E suite is deliberately independent of every external service. It
 has been verified to pass with `AI_ENGINE_BASE_URL` pointed at a dead port.
 
+The extension's full `vscode-test` GUI suite was not executed here; headless
+lint, compile, webview build, unit tests, and a live client test all passed.
+
 Details: [docs/testing/testing-guide.md](docs/testing/testing-guide.md).
-
----
-
-## Repository structure
-
-What exists in this branch:
-
-```
-.
-├── apps/
-│   ├── api/                  NestJS backend (TypeScript, port 3000)
-│   └── ai-engine/            FastAPI AI Engine (Python 3.11, port 8000)
-├── docs/                     Documentation (see below)
-├── .github/workflows/
-│   └── backend.yml           Backend CI
-├── .env.example              Optional Compose overrides, no credentials
-├── .gitignore
-├── compose.yaml              Backend + AI Engine, two services
-└── README.md
-```
-
-What does **not** exist here but exists on another branch:
-
-- `feature/member2-vscode-frontend` — the extension's `package.json` sits at the
-  **repository root** on that branch, with `src/` and `webview-ui/`
-
-Because the extension is rooted at the repository root on its branch, the final
-merged layout has not been decided yet.
 
 ---
 
@@ -413,6 +571,9 @@ Current posture, stated plainly:
 - `X-Request-Id` is validated against `/^[A-Za-z0-9._~-]{1,128}$/`; anything
   else is replaced with a fresh UUID, which blocks header injection and log
   forging.
+- The extension never calls an AI provider directly; it only speaks to the
+  backend, and `aicode.backendUrl` is a user-controlled setting with no embedded
+  credentials.
 
 **Not in place — current limitations, not completed features**
 
@@ -443,12 +604,14 @@ Current posture, stated plainly:
 - **`X-Request-Id` is not propagated to the AI Engine.** The backend sends only
   `Content-Type`, so the AI Engine mints a separate ID. A client still sees one
   consistent ID across header, body, and backend logs.
-- The VS Code extension is not merged, so there is no single-checkout run that
-  includes the extension. Its client has been validated headlessly against this
-  backend instead.
+- The extension is rooted at the repository root while the backend is under
+  `apps/api`, so a bare `npm` command at the root always means the extension.
+  This is a known rough edge, not a designed namespace layout.
 - The extension's full `vscode-test` GUI suite was not executed; it downloads and
   launches VS Code. Headless lint, compile, webview build, unit tests, and a live
   client test all passed.
+- The extension defaults to `aicode.useMockData: true`, so a fresh install shows
+  demo data rather than calling the backend.
 - AI answer quality has not been systematically evaluated.
 - Docker Compose is a **local, single-host development** stack only. No
   deployment automation, no registry publishing, no database. It has no
@@ -459,7 +622,8 @@ Current posture, stated plainly:
 - `GET /ready` on both services reports configuration readiness only. It never
   contacts Ollama, so it is not evidence that the LLM path works.
 - CI covers the backend only. `.github/workflows/ai-engine.yml` exists on
-  `origin/feature/member3-ai` but is not on this branch.
+  `origin/feature/member3-ai` but is not on this branch. There is no CI for the
+  extension either.
 - The `context` request field has no maximum length, and `/explanations`
   performs no field validation of its own.
 - There is no automated multi-service E2E test in CI. The real multi-service
@@ -474,8 +638,8 @@ Current posture, stated plainly:
 | Backend | NestJS 12, TypeScript (ESM), Express, Jest, `oxlint` |
 | AI Engine | Python 3.11+, FastAPI, Uvicorn, Pydantic, `httpx`, pytest |
 | LLM runtime | Ollama (host process) with `llama3` and `qwen3:8b` |
-| Extension | TypeScript, VS Code extension host, React 18, Zustand, Vite, axios |
-| Packaging | Docker (multi-stage images), Docker Compose |
+| Extension | TypeScript, VS Code extension host, React 18, Zustand, Vite, axios, ESLint |
+| Packaging | Docker (multi-stage images), Docker Compose; `.vsix` via `vsce` |
 | CI | GitHub Actions (backend) |
 
 **Not used at runtime:** IBM watsonx.ai and watsonx Orchestrate. The only model
@@ -488,19 +652,31 @@ been written or verified here.
 ## Team and contribution structure
 
 Work is split across four feature branches. This branch is the integration
-branch for the backend and the AI Engine.
+branch for all three delivered layers.
 
 | Owner | Branch | Contribution | State here |
 |---|---|---|---|
 | Member 1 | `feature/member1-backend-core-intelligence` | NestJS backend, AI Engine integration, Docker/Compose, CI, documentation | **this branch** |
-| Member 2 | `feature/member2-vscode-frontend` | VS Code extension and React webview client | separate branch; headless validation passed against this backend |
+| Member 2 | `feature/member2-vscode-frontend` | VS Code extension and React webview client | **merged into this branch**; headless validation passed against the backend |
 | Member 3 | `feature/member3-ai` | FastAPI AI Engine, Ollama provider, evidence/confidence model | synchronised into `apps/ai-engine` at `04faea5` |
 | Member 4 | `feature/member4-code-intelligence` | Code intelligence module | separate branch; not merged |
 
-The VS Code extension is developed with its `package.json` at the **repository
-root** of its branch, which is why it cannot be merged into
-`apps/api`-rooted layout without a layout decision. That merge is outstanding
-work, not something this branch attempts.
+The extension keeps its `package.json` at the **repository root**, so root-level
+`npm` commands are the extension's and the backend's commands run from
+`apps/api`. This asymmetry is a known rough edge of the merge, documented in
+[Repository structure](#repository-structure) rather than silently papered over.
+
+Conventions for branching, merging and conflict resolution:
+[docs/development/git-workflow.md](docs/development/git-workflow.md).
+
+---
+
+## Release notes
+
+Extension release notes are kept in
+[CHANGELOG.md](CHANGELOG.md), following
+[Keep a Changelog](http://keepachangelog.com/). It currently records an initial
+release under `## [Unreleased]`.
 
 ---
 
@@ -511,7 +687,10 @@ work, not something this branch attempts.
 | [System Architecture](docs/architecture/system-architecture.md) | Layer-by-layer design, implementation status |
 | [Integration Contracts](docs/architecture/integration-contracts.md) | Verified request/response contracts between layers |
 | [Environment](docs/development/environment.md) | Variables, ports, version requirements |
+| [Git Workflow](docs/development/git-workflow.md) | Branching, merging, and conflict-resolution conventions |
 | [Testing Guide](docs/testing/testing-guide.md) | Every command, and what is deterministic |
 | [Deployment Guide](docs/deployment/deployment-guide.md) | Current startup; what is not implemented |
 | [Troubleshooting](docs/development/troubleshooting.md) | Known problems and fixes |
 | [Backend README](apps/api/README.md) | Backend-specific reference |
+| [CHANGELOG.md](CHANGELOG.md) | Extension release notes |
+| [Extension Quickstart](vsc-extension-quickstart.md) | VS Code scaffolding walkthrough |

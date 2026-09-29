@@ -152,3 +152,12 @@ ENV/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# VS Code extension packaging output (Member 2)
+*.vsix
+
+# Webview dependencies and build output (Member 2)
+# `node_modules/`, `dist` and `out` above already cover these; listed
+# explicitly to keep the extension's own locations obvious.
+webview-ui/node_modules
+webview-ui/dist

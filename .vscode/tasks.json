@@ -1,0 +1,50 @@
+// See https://go.microsoft.com/fwlink/?LinkId=733558
+// for the documentation about the tasks.json format
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			// ── Default build task: used by F5 "preLaunchTask" ──────────────
+			// Runs tsc -watch in the background so incremental recompile works
+			// while the Extension Development Host is open.
+			"type": "npm",
+			"script": "watch",
+			"problemMatcher": "$tsc-watch",
+			"isBackground": true,
+			"presentation": {
+				"reveal": "never"
+			},
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			// ── One-shot compile: use this before first F5 if watch hasn't run ─
+			// Run via Terminal → Run Task → "compile"
+			"type": "npm",
+			"script": "compile",
+			"problemMatcher": "$tsc",
+			"isBackground": false,
+			"presentation": {
+				"reveal": "silent",
+				"panel": "shared"
+			},
+			"group": "build"
+		},
+		{
+			// ── Webview build: builds React UI into webview-ui/dist/ ──────────
+			// Must be run at least once before F5, or whenever webview-ui/src changes.
+			// Run via Terminal → Run Task → "build-webview"
+			"type": "npm",
+			"script": "build-webview",
+			"problemMatcher": [],
+			"isBackground": false,
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared"
+			},
+			"group": "build"
+		}
+	]
+}
