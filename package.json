@@ -2,6 +2,7 @@
   "name": "aicode-understanding-assistant",
   "displayName": "AI Code Understanding Assistant",
   "description": "AI-powered code understanding assistant for Visual Studio Code that explains code, detects issues, and helps developers understand complex programs.",
+  "icon": "media/icon.png",
   "version": "0.1.0",
   "engines": {
     "vscode": "^1.138.0"
