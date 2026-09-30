@@ -45,7 +45,7 @@ Not present in this checkout. Developed on `feature/member2-vscode-frontend`
 (head `dc4941c`), where the extension's `package.json` sits at the **repository
 root** alongside `src/` and `webview-ui/`.
 
-From inspection of that branch: 11 contributed commands, an activity-bar webview,
+From inspection of that branch: 10 contributed commands, an activity-bar webview,
 a React 18 + Zustand + Vite UI, and an axios HTTP client whose request shapes
 match the backend. Its `aicode.useMockData` setting defaults to `true`, and its
 axios timeout is **70 000 ms**, deliberately larger than the backend's 60s budget
@@ -53,8 +53,10 @@ so a slow but successful analysis is not misreported as a client-side timeout.
 
 Verified headlessly against a running backend and AI Engine: lint, `tsc`
 compile, webview build, 42 unit tests, and a live client test with 15/15
-assertions passing. The full `vscode-test` GUI suite was not executed, because
-it downloads and launches VS Code.
+assertions passing. The `vscode-test` suite additionally runs in a real
+Extension Development Host (`npm test` from the repository root): 67 tests,
+covering activation, command registration, the webview panel's asset wiring, and
+the command → webview message flow in both mock and real mode.
 
 ### 2.2 NestJS Backend — IMPLEMENTED
 

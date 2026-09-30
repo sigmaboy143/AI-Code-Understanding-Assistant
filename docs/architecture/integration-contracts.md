@@ -17,8 +17,10 @@ The intended client is the VS Code extension on `feature/member2-vscode-frontend
 (head `dc4941c`). Its declared request shapes were checked against the backend
 and match. Its unmodified `apiService` and analysis adapter have additionally
 been exercised **headlessly against a running backend and AI Engine** in a real
-runtime, with all 15 assertions passing. The full `vscode-test` GUI suite has
-not been run.
+runtime, with all 15 assertions passing. The `vscode-test` suite now also runs
+in a real Extension Development Host (`npm test` from the repository root), and
+covers the request shapes above against a local HTTP server, without a live
+Ollama.
 
 ## 1.1 Common behaviour
 

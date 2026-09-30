@@ -40,7 +40,7 @@ Ollama / LLM  (port 11434)               ← host process, not containerised
 |---|---|---|
 | NestJS backend | **Implemented** | Lint, build, 455 unit/integration tests, 5 E2E tests all pass |
 | AI Engine | **Implemented** | In `apps/ai-engine`, synchronised from `origin/feature/member3-ai` at `04faea5`. Owned by Member 3. 870 tests pass |
-| VS Code extension + React webview | **Implemented** | In this checkout, rooted at the repository root. Owned by Member 2. Headless lint, compile, webview build, unit tests, and a live-client test all passed against this backend |
+| VS Code extension + React webview | **Implemented** | In this checkout, rooted at the repository root. Owned by Member 2. Lint, compile, webview build, 42 headless unit tests and 25 extension-host integration tests all pass |
 | Ollama | **External** | Host process on `11434`; deliberately not containerised. `llama3` and `qwen3:8b` both validated |
 | PostgreSQL | **Not implemented** | No code, no client, no migration |
 | Redis | **Not implemented** | No code, no client |
@@ -176,6 +176,17 @@ npm test                # extension-host tests (downloads VS Code on first run)
 
 `pretest` runs `npm run compile && npm run lint` first.
 
+`npm test` runs two files inside a real Extension Development Host:
+
+| File | Covers |
+|---|---|
+| `src/test/unit/analysisAdapter.test.ts` | Request/response mapping and error classification, with no `vscode` import. Runs headless via `npm run test:unit` |
+| `src/test/extension.test.ts` | Activation, every contributed command actually being registered, the activity-bar contribution, and that `aicode.useMockData` / `backendUrl` / `explanationMode` are the settings the code reads |
+| `src/test/panel.test.ts` | The user-facing path: `openAssistant` serving the built bundle, the React app posting `ready`, and a command producing `setTab` / `loading` / `explanationResult` / `capability` / `error` messages. Real mode is exercised against a local HTTP server that returns a genuine `AnalysisResult`, so the axios call, the `X-Request-Id` header and the response mapping are all covered |
+
+Nothing in those files stubs the `vscode` module; a stubbed module would test the
+mock rather than the extension.
+
 ### Correlation
 
 Each real request carries an `X-Request-Id` header. The backend's correlation
@@ -195,9 +206,11 @@ reporting a problem.
   than being filled with generated prose.
 - The backend caps `code` at 100000 characters. Selecting more than that is
   reported before the request is sent.
-- The extension's full `vscode-test` GUI suite was not executed; it downloads
-  and launches VS Code. Headless lint, compile, webview build, unit tests, and a
-  live client test all passed.
+- The extension-host suite (`npm test`) launches VS Code and covers activation,
+  command registration, the panel's webview wiring, and the command → webview
+  message flow in both mock and real mode against a local HTTP backend. The
+  remaining unverified path is the full extension → backend → AI Engine → Ollama
+  chain, which has only been run manually.
 
 Authoring guidance: see
 [VS Code Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines).
@@ -539,15 +552,15 @@ Then press <kbd>F5</kbd>. See
 | Backend unit + integration | `npm test` *(from `apps/api`)* | **Yes** — fully mocked, no network (19 suites, 455 tests) |
 | Backend E2E smoke | `npm run test:e2e` *(from `apps/api`)* | **Yes** — no AI Engine, Ollama, or database (1 suite, 5 tests) |
 | AI Engine unit + integration | `python -m pytest` | **Yes** — uses a mock provider (29 files, 870 tests) |
-| Extension unit (contract/adapter) | `npm run test:unit` *(from root)* | **Yes** — no VS Code download required |
-| Extension host | `npm test` *(from root)* | **Partly** — downloads and launches VS Code on first run |
+| Extension unit (contract/adapter) | `npm run test:unit` *(from root)* | **Yes** — no VS Code download required (42 tests) |
+| Extension host | `npm test` *(from root)* | **Yes** — real VS Code, but no Ollama/backend needed (67 tests) |
 | Live end-to-end | the curl in [Option A](#option-a--docker-compose-recommended) | **No** — real Ollama required |
 
 The backend E2E suite is deliberately independent of every external service. It
 has been verified to pass with `AI_ENGINE_BASE_URL` pointed at a dead port.
 
-The extension's full `vscode-test` GUI suite was not executed here; headless
-lint, compile, webview build, unit tests, and a live client test all passed.
+The extension's own suite runs green: lint, compile, webview build, 42 headless
+unit tests, and 67 tests inside a real Extension Development Host.
 
 Details: [docs/testing/testing-guide.md](docs/testing/testing-guide.md).
 
@@ -626,8 +639,11 @@ Current posture, stated plainly:
   extension either.
 - The `context` request field has no maximum length, and `/explanations`
   performs no field validation of its own.
-- There is no automated multi-service E2E test in CI. The real multi-service
-  path has been exercised manually and is reproducible with the curl above.
+- No automated multi-service E2E test. The real extension → backend → AI Engine
+  → Ollama chain has been exercised manually and is reproducible with the curl in
+  [Option A](#option-a--docker-compose-recommended), but no test asserts it on
+  every commit. The extension-host suite stands in for everything up to and
+  including the backend's HTTP contract.
 
 ---
 
