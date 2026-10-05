@@ -1,4 +1,5 @@
 ﻿import { IsArray, IsString, IsOptional, IsNumber, IsNotEmpty, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class EvidenceItem {
   @IsString()
@@ -28,7 +29,8 @@ export class AnalyzeRequestDto {
   question!: string;
 
   @IsArray()
-  @ValidateNested()
+  @ValidateNested({ each: true })
+  @Type(() => EvidenceItem)
   evidence!: EvidenceItem[];
 
   @IsOptional()
