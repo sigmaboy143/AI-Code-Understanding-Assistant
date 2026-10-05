@@ -22,6 +22,7 @@ import { ConversationsModule } from './conversations/conversations.module.js';
 import { OnboardingModule } from './onboarding/onboarding.module.js';
 import { HealthModule } from './health/health.module.js';
 import { CommonModule } from './common/common.module.js';
+import { CodeIntelligenceModule } from './code-intelligence/code-intelligence.module.js';
 import { createValidationPipe } from './common/validation/validation-pipe.js';
 
 @Module({
@@ -49,6 +50,7 @@ import { createValidationPipe } from './common/validation/validation-pipe.js';
     ConversationsModule,
     OnboardingModule,
     HealthModule,
+    CodeIntelligenceModule,
   ],
   controllers: [AppController],
   providers: [

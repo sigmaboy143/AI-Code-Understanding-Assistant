@@ -5,6 +5,7 @@ export enum RelationshipKind {
   Implements = 'implements',
   References = 'references',
   Instantiates = 'instantiates',
+  Contains = 'contains',
 }
 
 export interface CodeRelationship {
