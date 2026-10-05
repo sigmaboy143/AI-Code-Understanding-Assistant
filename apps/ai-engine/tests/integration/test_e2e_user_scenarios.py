@@ -87,7 +87,12 @@ client = TestClient(app)
 
 #: The complete public surface.  Pinned so a new route cannot appear without a
 #: deliberate decision about which scenario it serves.
-PUBLIC_API_PATHS = frozenset({"/health", "/ready", "/api/v1/code-understanding"})
+PUBLIC_API_PATHS = frozenset({
+    "/health",
+    "/ready",
+    "/api/v1/code-understanding",
+    "/api/v1/retrieve",  # Source-backed retrieval for the NestJS hub (Gemma) integration.
+})
 
 
 def _post(payload: dict, provider) -> dict:
@@ -531,11 +536,17 @@ def test_debug_scenario_suggested_fixes_invent_no_repository_facts():
 
 
 def test_onboarding_scenario_is_not_exposed_as_its_own_api_capability():
-    """The public surface is exactly three paths, and onboarding is not one.
+    """The public surface is exactly four paths, and onboarding is not one.
 
-    Recorded deliberately: if a future phase adds an onboarding route, this
-    test fails and forces a decision about which scenario it serves, rather
-    than the capability appearing silently and untested.
+    Recorded deliberately: if a future phase adds a route, this test fails and
+    forces a decision about which scenario it serves, rather than the capability
+    appearing silently and untested.
+
+    The four paths are:
+    - /health           — liveness
+    - /ready            — readiness
+    - /api/v1/code-understanding — code analysis (LLM)
+    - /api/v1/retrieve  — source-backed retrieval for the hub/Gemma integration
     """
     assert set(app.openapi()["paths"]) == set(PUBLIC_API_PATHS)
 

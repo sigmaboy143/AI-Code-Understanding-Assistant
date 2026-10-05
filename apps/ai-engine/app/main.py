@@ -31,10 +31,12 @@ import asyncio
 import logging
 import os
 import time
+from typing import List, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.logging_context import (
@@ -50,6 +52,7 @@ from app.schemas.code_understanding import (
     CodeUnderstandingResponse,
 )
 from app.schemas.errors import make_error
+from app.adapters.iretrieval_adapter import RepositoryRetrievalAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +108,36 @@ app = FastAPI(
     description="AI Engine foundation for code understanding, RAG, and reasoning.",
     version="0.1.0",
 )
+
+# ---------------------------------------------------------------------------
+# Retrieve request/response schemas
+# ---------------------------------------------------------------------------
+
+
+class RetrieveRequest(BaseModel):
+    """Request body for the retrieval endpoint."""
+    repository_path: str = Field(description="Absolute path to the repository root.")
+    query: str = Field(description="Natural-language question.")
+    top_k: int = Field(default=5, ge=1, le=50, description="Maximum chunks to return.")
+
+
+class RetrieveChunkItem(BaseModel):
+    """A single evidence chunk in the retrieval response."""
+    file_path: str
+    symbol: Optional[str] = None
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    relevance_score: float
+    chunk_id: str
+    content: str
+
+
+class RetrieveResponse(BaseModel):
+    """Response from the retrieval endpoint."""
+    chunks: List[RetrieveChunkItem]
+    query: str
+    repository_path: str
+    top_k: int
 
 
 # ---------------------------------------------------------------------------
@@ -336,3 +369,72 @@ async def code_understanding(request: CodeUnderstandingRequest) -> CodeUnderstan
             status_code=500,
             content=make_error("INTERNAL_ERROR", "An unexpected error occurred."),
         )
+
+
+# ---------------------------------------------------------------------------
+# Retrieval endpoint
+# ---------------------------------------------------------------------------
+
+# Single shared adapter instance — stateless (ingestion is cached in
+# app.retrieval.service._repo_index, so re-using the instance is safe).
+_retrieval_adapter = RepositoryRetrievalAdapter()
+
+
+@app.post(
+    "/api/v1/retrieve",
+    response_model=RetrieveResponse,
+    status_code=200,
+    responses={
+        422: {"description": "Validation error"},
+        500: {"description": "Internal error"},
+    },
+)
+def retrieve(request: RetrieveRequest) -> RetrieveResponse:
+    """Retrieve the top-k most relevant source chunks for a natural-language query.
+
+    Accepts a ``RetrieveRequest`` with a repository path and a query string.
+    Returns ranked chunks with file path, symbol, line range, and actual
+    source-code content.
+
+    This endpoint is designed to be called by the NestJS API's
+    ``RealRetrievalAdapter`` so it can attach ``evidence.code`` before sending
+    the evidence to the Gemma adapter.
+    """
+    try:
+        result = _retrieval_adapter.search(
+            request.repository_path,
+            request.query,
+            top_k=request.top_k,
+        )
+    except Exception as exc:
+        logger.exception(
+            "retrieval error%s",
+            correlation_suffix(
+                outcome="internal_error",
+                detail=type(exc).__name__,
+            ),
+        )
+        return JSONResponse(
+            status_code=500,
+            content=make_error("INTERNAL_ERROR", "Retrieval failed."),
+        )
+
+    chunks = [
+        RetrieveChunkItem(
+            file_path=chunk.file_path,
+            symbol=chunk.symbol,
+            line_start=chunk.line_start,
+            line_end=chunk.line_end,
+            relevance_score=chunk.relevance_score,
+            chunk_id=chunk.chunk_id,
+            content=chunk.content,
+        )
+        for chunk in result.chunks
+    ]
+
+    return RetrieveResponse(
+        chunks=chunks,
+        query=request.query,
+        repository_path=request.repository_path,
+        top_k=request.top_k,
+    )

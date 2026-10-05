@@ -23,6 +23,7 @@ import { OnboardingModule } from './onboarding/onboarding.module.js';
 import { HealthModule } from './health/health.module.js';
 import { CommonModule } from './common/common.module.js';
 import { createValidationPipe } from './common/validation/validation-pipe.js';
+import { HubModule } from './hub/hub.module.js';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { createValidationPipe } from './common/validation/validation-pipe.js';
     ConversationsModule,
     OnboardingModule,
     HealthModule,
+    HubModule,
   ],
   controllers: [AppController],
   providers: [
