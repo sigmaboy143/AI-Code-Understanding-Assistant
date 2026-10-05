@@ -35,19 +35,53 @@ from typing import Sequence
 from app.retrieval.base import RetrieverBase, RetrievedChunk
 
 
+# Symbol boost fraction added when a query token exactly matches the chunk's
+# symbol name (or any dot-separated part of it, e.g. "ClassName" from
+# "ClassName.method").  The boost is capped so the final score stays ≤ 1.0.
+# Value rationale: 0.1 is enough to break ties and lift an exact symbol match
+# above a longer chunk whose body happens to contain the same word, without
+# making the boost large enough to overwhelm a poor content match.
+_SYMBOL_BOOST = 0.10
+
+
 def _tokenise(text: str) -> list[str]:
     """Split *text* into lower-case word tokens."""
     return re.findall(r"[a-z0-9_]+", text.lower())
 
 
 def _score(chunk: RetrievedChunk, query_tokens: list[str]) -> float:
-    """Return the proportion of query tokens found in *chunk*'s content."""
+    """Return a relevance score for *chunk* against *query_tokens*.
+
+    Algorithm
+    ---------
+    1. Token-overlap proportion: (matched unique query tokens) / (total unique
+       query tokens).  This gives a base score in [0.0, 1.0].
+    2. Symbol boost: if the chunk carries a ``symbol`` and at least one query
+       token matches a part of that symbol (case-insensitive), add
+       ``_SYMBOL_BOOST``.  The final score is capped at 1.0.
+
+    The symbol boost is documented explicitly so ranking behaviour is not
+    opaque: a result moves higher because the query contains the exact symbol
+    name or a part of the qualified symbol (e.g. ``"login"`` matches
+    ``"Auth.login"``).
+    """
     if not query_tokens:
         return 0.0
     unique_query = set(query_tokens)
     content_tokens = set(_tokenise(chunk.content))
     matched = unique_query & content_tokens
-    return len(matched) / len(unique_query)
+    base = len(matched) / len(unique_query)
+
+    # Symbol boost: lift chunks whose declared symbol exactly matches a query
+    # token.  This makes "login" prefer chunks annotated symbol="login" or
+    # symbol="AuthService.login" over chunks that merely mention the word.
+    boost = 0.0
+    if base > 0.0 and chunk.symbol:
+        symbol_parts = set(_tokenise(chunk.symbol))
+        if symbol_parts & unique_query:
+            boost = _SYMBOL_BOOST
+
+    return min(base + boost, 1.0)
 
 
 class InMemoryRetriever(RetrieverBase):
