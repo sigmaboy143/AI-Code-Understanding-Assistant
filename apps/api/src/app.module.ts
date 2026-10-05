@@ -21,6 +21,7 @@ import { ExplanationsModule } from './explanations/explanations.module.js';
 import { ConversationsModule } from './conversations/conversations.module.js';
 import { OnboardingModule } from './onboarding/onboarding.module.js';
 import { HealthModule } from './health/health.module.js';
+import { GemmaModule } from './gemma/gemma.module.js';
 import { CommonModule } from './common/common.module.js';
 import { createValidationPipe } from './common/validation/validation-pipe.js';
 
@@ -49,6 +50,7 @@ import { createValidationPipe } from './common/validation/validation-pipe.js';
     ConversationsModule,
     OnboardingModule,
     HealthModule,
+    GemmaModule,
   ],
   controllers: [AppController],
   providers: [
